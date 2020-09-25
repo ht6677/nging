@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mholt/certmagic"
+	"github.com/caddyserver/certmagic"
 	"github.com/spf13/cobra"
 	"github.com/webx-top/echo"
 	"github.com/webx-top/echo/engine"
@@ -33,15 +33,14 @@ import (
 	"github.com/webx-top/echo/middleware"
 	"github.com/webx-top/echo/subdomains"
 
-	"github.com/admpub/events/emitter"
 	figure "github.com/admpub/go-figure"
 	"github.com/admpub/log"
 	"github.com/admpub/nging/application/cmd/event"
 	"github.com/admpub/nging/application/handler/setup"
 	"github.com/admpub/nging/application/library/config"
+	"github.com/admpub/nging/application/library/config/startup"
 	"github.com/admpub/nging/application/library/license"
 	"github.com/admpub/nging/application/library/msgbox"
-	"github.com/admpub/nging/application/library/config/startup"
 )
 
 // Nging 启动入口
@@ -120,9 +119,7 @@ If you have already purchased a license, please place the ` + license.FileName()
 	if c.TLSAuto || hasCert {
 		if config.DefaultCLIConfig.Port == 80 {
 			if c.TLSAuto {
-				if err := initCertMagic(c); err != nil {
-					panic(err)
-				}
+				echo.PanicIf(initCertMagic(c))
 				//c.SupportAutoTLS(nil, config.DefaultConfig.Sys.SSLHosts...)
 			} else {
 				c.Address = fmt.Sprintf(`%s:443`, config.DefaultCLIConfig.Address)
@@ -141,7 +138,7 @@ If you have already purchased a license, please place the ` + license.FileName()
 			now.Format("Monday, 02 Jan 2006"))
 	}
 	subdomains.Default.SetDebug(config.DefaultConfig.Debug)
-	emitter.DefaultCondEmitter.Fire(`beforeRun`, -1)
+	echo.Fire(`beforeRun`, -1)
 	subdomains.Default.Run(standard.NewWithConfig(c))
 	return c.Listener.Close()
 }
@@ -154,12 +151,12 @@ func initCertMagic(c *engine.Config) error {
 		return err
 	}
 	if event.Develop { // use the staging endpoint while we're developing
-		certmagic.Default.CA = certmagic.LetsEncryptStagingCA
+		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 	} else {
-		certmagic.Default.CA = certmagic.LetsEncryptProductionCA
+		certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
 	}
-	certmagic.Default.Email = c.TLSEmail
-	certmagic.Default.Agreed = true
+	certmagic.DefaultACME.Email = c.TLSEmail
+	certmagic.DefaultACME.Agreed = true
 	certmagic.Default.Storage = fileStorage
 	ln, err := certmagic.Listen(c.TLSHosts)
 	if err == nil {

@@ -28,8 +28,12 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/admpub/nging/application/dbschema"
 	"github.com/admpub/nging/application/library/charset"
+	"github.com/admpub/nging/application/library/common"
 	"github.com/admpub/nging/application/library/filemanager"
+	"github.com/admpub/nging/application/library/s3manager/s3client/awsclient"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/s3"
 	minio "github.com/minio/minio-go"
 	"github.com/pkg/errors"
@@ -37,16 +41,18 @@ import (
 	"github.com/webx-top/echo"
 )
 
-func New(client *minio.Client, bucketName string, editableMaxSize int64) *S3Manager {
+func New(client *minio.Client, config *dbschema.NgingCloudStorage, editableMaxSize int64) *S3Manager {
 	return &S3Manager{
 		client:          client,
-		bucketName:      bucketName,
+		config:          config,
+		bucketName:      config.Bucket,
 		EditableMaxSize: editableMaxSize,
 	}
 }
 
 type S3Manager struct {
 	client          *minio.Client
+	config          *dbschema.NgingCloudStorage
 	bucketName      string
 	EditableMaxSize int64
 }
@@ -120,23 +126,63 @@ func (s *S3Manager) Mkdir(ppath, newName string) error {
 	return err
 }
 
-func (s *S3Manager) Rename(ppath, newName string) error {
-	objectName := strings.TrimPrefix(ppath, `/`)
-	// Source object
-	src := minio.NewSourceInfo(s.bucketName, objectName, nil)
+func (s *S3Manager) renameDirectory(ppath, newName string) error {
+	dirName := strings.TrimPrefix(ppath, `/`)
 	newName = strings.TrimPrefix(newName, `/`)
-	dst, err := minio.NewDestinationInfo(s.bucketName, newName, nil, nil)
+	if !strings.HasSuffix(newName, `/`) {
+		newName += `/`
+	}
+	// 新建文件夹
+	_, err := s.client.PutObject(s.bucketName, newName, nil, 0, minio.PutObjectOptions{})
 	if err != nil {
 		return err
 	}
+	doneCh := make(chan struct{})
+	defer close(doneCh)
+	objectCh := s.client.ListObjectsV2(s.bucketName, dirName, true, doneCh)
+	for object := range objectCh {
+		if object.Err != nil {
+			continue
+		}
+		if len(object.Key) == 0 || object.Key == dirName {
+			continue
+		}
+		dest := strings.TrimPrefix(object.Key, dirName)
+		dest = path.Join(newName, dest)
+		// println(object.Key, ` => `, dest)
+		err = s.Move(object.Key, dest)
+		if err != nil {
+			return err
+		}
+	}
+	return s.client.RemoveObject(s.bucketName, dirName)
+}
 
-	// Initiate copy object.
-	err = s.client.CopyObject(dst, src)
+func (s *S3Manager) Rename(ppath, newName string) error {
+	if strings.HasSuffix(ppath, `/`) {
+		return s.renameDirectory(ppath, newName)
+	}
+	objectName := strings.TrimPrefix(ppath, `/`)
+	newName = strings.TrimPrefix(newName, `/`)
+	return s.Move(objectName, newName)
+}
+
+func (s *S3Manager) Move(from, to string) error {
+	err := s.Copy(from, to)
 	if err != nil {
 		return err
 	}
-	err = s.client.RemoveObject(s.bucketName, objectName)
-	return err
+	return s.client.RemoveObject(s.bucketName, from)
+}
+
+func (s *S3Manager) Copy(from, to string) error {
+	// Source object
+	src := minio.NewSourceInfo(s.bucketName, from, nil)
+	dst, err := minio.NewDestinationInfo(s.bucketName, to, nil, nil)
+	if err != nil {
+		return err
+	}
+	return s.client.CopyObject(dst, src)
 }
 
 func (s *S3Manager) Chown(ppath string, uid, gid int) error {
@@ -182,7 +228,6 @@ func (s *S3Manager) RemoveDir(ppath string) error {
 	if objectName == `/` {
 		return s.Clear()
 	}
-	s.client.RemoveObject(s.bucketName, objectName)
 	doneCh := make(chan struct{})
 	defer close(doneCh)
 	objectCh := s.client.ListObjectsV2(s.bucketName, objectName, true, doneCh)
@@ -198,7 +243,8 @@ func (s *S3Manager) RemoveDir(ppath string) error {
 			return err
 		}
 	}
-	return nil
+
+	return s.client.RemoveObject(s.bucketName, objectName)
 }
 
 // Clear 清空所有数据【慎用】
@@ -303,21 +349,9 @@ func (s *S3Manager) Download(ctx echo.Context, ppath string) error {
 	return ctx.Attachment(f, fileName, inline)
 }
 
-func (s *S3Manager) List(ctx echo.Context, ppath string, sortBy ...string) (err error, exit bool, dirs []os.FileInfo) {
+func (s *S3Manager) listByMinio(ctx echo.Context, objectPrefix string) (err error, dirs []os.FileInfo) {
 	doneCh := make(chan struct{})
 	defer close(doneCh)
-	objectPrefix := strings.TrimPrefix(ppath, `/`)
-	words := len(objectPrefix)
-	var forceDir bool
-	if words == 0 {
-		forceDir = true
-	} else {
-		if strings.HasSuffix(objectPrefix, `/`) {
-			forceDir = true
-		} else {
-			objectPrefix += `/`
-		}
-	}
 	objectCh := s.client.ListObjectsV2(s.bucketName, objectPrefix, false, doneCh)
 	for object := range objectCh {
 		if object.Err != nil {
@@ -331,6 +365,98 @@ func (s *S3Manager) List(ctx echo.Context, ppath string, sortBy ...string) (err 
 		}
 		obj := NewFileInfo(object)
 		dirs = append(dirs, obj)
+	}
+	return
+}
+
+func (s *S3Manager) listByAWS(ctx echo.Context, objectPrefix string) (err error, dirs []os.FileInfo) {
+	var s3client *s3.S3
+	s3client, err = awsclient.Connect(s.config)
+	if err != nil {
+		return
+	}
+	_, limit, _, pagination := common.PagingWithPagination(ctx)
+	if limit < 1 {
+		limit = 20
+	}
+	offset := ctx.Form(`offset`)
+	prevOffset := ctx.Form(`prev`)
+	var nextOffset string
+	q := ctx.Request().URL().Query()
+	q.Del(`offset`)
+	q.Del(`prev`)
+	q.Del(`_pjax`)
+	pagination.SetURL(ctx.Request().URL().Path() + `?` + q.Encode() + `&offset={curr}&prev={prev}`)
+	input := &s3.ListObjectsInput{
+		Bucket:    aws.String(s.bucketName),
+		Prefix:    aws.String(objectPrefix),
+		MaxKeys:   aws.Int64(int64(limit)),
+		Delimiter: aws.String(`/`),
+		Marker:    aws.String(offset),
+	}
+	var n int
+	err = s3client.ListObjectsPagesWithContext(ctx, input, func(p *s3.ListObjectsOutput, lastPage bool) bool {
+		if p.NextMarker != nil {
+			nextOffset = *p.NextMarker
+		}
+		for _, object := range p.CommonPrefixes {
+			if object.Prefix == nil {
+				continue
+			}
+			if len(objectPrefix) > 0 {
+				key := strings.TrimPrefix(*object.Prefix, objectPrefix)
+				object.Prefix = &key
+			}
+			if len(*object.Prefix) == 0 {
+				continue
+			}
+			obj := NewStrFileInfo(*object.Prefix)
+			dirs = append(dirs, obj)
+		}
+		for _, object := range p.Contents {
+			if object.Key == nil {
+				continue
+			}
+			if len(objectPrefix) > 0 {
+				key := strings.TrimPrefix(*object.Key, objectPrefix)
+				object.Key = &key
+			}
+			if len(*object.Key) == 0 {
+				continue
+			}
+			obj := NewS3FileInfo(object)
+			dirs = append(dirs, obj)
+		}
+		n += len(dirs)
+		return n <= limit // continue paging
+	})
+	pagination.SetPosition(prevOffset, nextOffset, offset)
+	ctx.Set(`pagination`, pagination)
+	return
+}
+
+func (s *S3Manager) List(ctx echo.Context, ppath string, sortBy ...string) (err error, exit bool, dirs []os.FileInfo) {
+	objectPrefix := strings.TrimPrefix(ppath, `/`)
+	words := len(objectPrefix)
+	var forceDir bool
+	if words == 0 {
+		forceDir = true
+	} else {
+		if strings.HasSuffix(objectPrefix, `/`) {
+			forceDir = true
+		} else {
+			objectPrefix += `/`
+		}
+	}
+	engine := ctx.Form(`engine`, `aws`)
+	switch engine {
+	case `aws`:
+		err, dirs = s.listByAWS(ctx, objectPrefix)
+	default:
+		err, dirs = s.listByMinio(ctx, objectPrefix)
+	}
+	if err != nil {
+		return
 	}
 	if !forceDir && len(dirs) == 0 {
 		return s.Download(ctx, ppath), true, nil

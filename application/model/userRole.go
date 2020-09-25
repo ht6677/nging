@@ -22,25 +22,59 @@ import (
 
 	"github.com/webx-top/db"
 	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/code"
 
 	"github.com/admpub/nging/application/dbschema"
 	"github.com/admpub/nging/application/library/perm"
 	"github.com/admpub/nging/application/model/base"
-	"github.com/admpub/nging/application/registry/navigate"
 )
 
 func NewUserRole(ctx echo.Context) *UserRole {
 	return &UserRole{
 		NgingUserRole: &dbschema.NgingUserRole{},
-		Base:          base.New(ctx),
+		base:          base.New(ctx),
 	}
 }
 
 type UserRole struct {
 	*dbschema.NgingUserRole
-	*base.Base
+	base        *base.Base
 	permActions *perm.Map
 	permCmds    *perm.Map
+}
+
+func (u *UserRole) check() error {
+	if len(u.Name) == 0 {
+		return u.base.NewError(code.InvalidParameter, `角色名不能为空`)
+	}
+	var exists bool
+	var err error
+	if u.Id > 0 {
+		exists, err = u.Exists2(u.Name, u.Id)
+	} else {
+		exists, err = u.Exists(u.Name)
+	}
+	if err != nil {
+		return err
+	}
+	if exists {
+		err = u.base.NewError(code.DataAlreadyExists, `角色名已经存在`)
+	}
+	return err
+}
+
+func (u *UserRole) Add() (interface{}, error) {
+	if err := u.check(); err != nil {
+		return nil, err
+	}
+	return u.NgingUserRole.Add()
+}
+
+func (u *UserRole) Edit(mw func(db.Result) db.Result, args ...interface{}) error {
+	if err := u.check(); err != nil {
+		return err
+	}
+	return u.NgingUserRole.Edit(mw, args...)
 }
 
 func (u *UserRole) Exists(name string) (bool, error) {
@@ -53,20 +87,7 @@ func (u *UserRole) ListByUser(user *dbschema.NgingUser) (roleList []*dbschema.Ng
 			db.Cond{`disabled`: `N`},
 			db.Cond{`id`: db.In(strings.Split(user.RoleIds, `,`))},
 		))
-	}
-	roleList = u.Objects()
-	return
-}
-
-func (u *UserRole) CheckPerm2(roleList []*dbschema.NgingUserRole, perm string) (hasPerm bool) {
-	perm = strings.TrimPrefix(perm, `/`)
-	for _, role := range roleList {
-		r := NewUserRole(nil)
-		r.NgingUserRole = role
-		if r.CheckPerm(perm) {
-			hasPerm = true
-			break
-		}
+		roleList = u.Objects()
 	}
 	return
 }
@@ -90,24 +111,13 @@ func (u *UserRole) CheckPerm(permPath string) bool {
 	if u.PermAction == `*` {
 		return true
 	}
+	navTree := perm.NavTreeCached()
 	if u.permActions == nil {
-		navTree := perm.NavTreeCached()
 		u.permActions = perm.NewMap()
 		u.permActions.Parse(u.PermAction, navTree)
 	}
-	return u.permActions.Check(permPath)
-}
 
-func (u *UserRole) CheckCmdPerm2(roleList []*dbschema.NgingUserRole, perm string) (hasPerm bool) {
-	for _, role := range roleList {
-		r := NewUserRole(nil)
-		r.NgingUserRole = role
-		if r.CheckCmdPerm(perm) {
-			hasPerm = true
-			break
-		}
-	}
-	return
+	return u.permActions.Check(permPath, navTree)
 }
 
 func (u *UserRole) CheckCmdPerm(permPath string) bool {
@@ -118,57 +128,8 @@ func (u *UserRole) CheckCmdPerm(permPath string) bool {
 		return true
 	}
 	if u.permCmds == nil {
-		u.permCmds = perm.NewMap()
-		perms := strings.Split(u.PermCmd, `,`)
-		for _, _perm := range perms {
-			arr := strings.Split(_perm, `/`)
-			result := u.permCmds.V
-			for _, a := range arr {
-				if _, y := result[a]; !y {
-					result[a] = perm.NewMap()
-				}
-				result = result[a].V
-			}
-		}
+		u.permCmds = perm.NewMap().ParseCmd(u.PermCmd)
 	}
 
-	arr := strings.Split(permPath, `/`)
-	result := u.permCmds.V
-	for _, a := range arr {
-		v, y := result[a]
-		if !y {
-			return false
-		}
-		result = v.V
-	}
-	return true
-}
-
-//FilterNavigate 过滤导航菜单，只显示有权限的菜单
-func (u *UserRole) FilterNavigate(roleList []*dbschema.NgingUserRole, navList *navigate.List) navigate.List {
-	var result navigate.List
-	if navList == nil {
-		return result
-	}
-	for _, nav := range *navList {
-		if !nav.Unlimited && !u.CheckPerm2(roleList, nav.Action) {
-			continue
-		}
-		navCopy := *nav
-		navCopy.Children = &navigate.List{}
-		for _, child := range *nav.Children {
-			var perm string
-			if len(child.Action) > 0 {
-				perm = nav.Action + `/` + child.Action
-			} else {
-				perm = nav.Action
-			}
-			if !nav.Unlimited && !u.CheckPerm2(roleList, perm) {
-				continue
-			}
-			*navCopy.Children = append(*navCopy.Children, child)
-		}
-		result = append(result, &navCopy)
-	}
-	return result
+	return u.permCmds.CheckCmd(permPath)
 }

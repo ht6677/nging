@@ -33,7 +33,6 @@ import (
 	"github.com/admpub/events"
 	"github.com/admpub/nging/application/dbschema"
 	"github.com/admpub/nging/application/model/base"
-	"github.com/admpub/nging/application/registry/upload/table"
 	"github.com/admpub/nging/application/model/file/storer"
 )
 
@@ -58,36 +57,6 @@ func (f *File) NewFile(m *dbschema.NgingFile) *File {
 	}
 	r.SetContext(f.base.Context)
 	return r
-}
-
-func (f *File) SetTableID(tableID string) table.TableInfoStorer {
-	if len(tableID) == 0 {
-		tableID = `0`
-	}
-	f.NgingFile.TableId = tableID
-	return f
-}
-
-func (f *File) SetTableName(table string) table.TableInfoStorer {
-	f.NgingFile.TableName = table
-	return f
-}
-
-func (f *File) SetFieldName(field string) table.TableInfoStorer {
-	f.NgingFile.FieldName = field
-	return f
-}
-
-func (f *File) TableID() string {
-	return f.NgingFile.TableId
-}
-
-func (f *File) TableName() string {
-	return f.NgingFile.TableName
-}
-
-func (f *File) FieldName() string {
-	return f.NgingFile.FieldName
 }
 
 func (f *File) SetByUploadResult(result *uploadClient.Result) *File {
@@ -205,10 +174,17 @@ func (f *File) GetBySavePath(storerInfo storer.Info, savePath string) (err error
 	return
 }
 
-func (f *File) GetByViewURL(storerInfo storer.Info, viewURL string) (err error) {
+func (f *File) GetByStorerAndURL(storerInfo storer.Info, viewURL string) (err error) {
 	err = f.Get(nil, db.And(
 		db.Cond{`storer_name`: storerInfo.Name},
 		db.Cond{`storer_id`: storerInfo.ID},
+		db.Cond{`view_url`: viewURL},
+	))
+	return
+}
+
+func (f *File) GetByViewURL(viewURL string) (err error) {
+	err = f.Get(nil, db.And(
 		db.Cond{`view_url`: viewURL},
 	))
 	return
@@ -227,7 +203,7 @@ func (f *File) FnGetByMd5() func(r *uploadClient.Result) error {
 		}
 		r.SavePath = fileD.SavePath
 		r.FileURL = fileD.ViewUrl
-		return table.ErrExistsFile
+		return uploadClient.ErrExistsFile
 	}
 }
 
@@ -251,31 +227,9 @@ func (f *File) DeleteBySavePath(savePath string) (err error) {
 	return f.fireDelete()
 }
 
-func (f *File) UpdateAvatar(project string, ownerType string, ownerID uint64) error {
-	f.base.Begin()
-	f.Use(f.base.Tx())
-	err := f.SetFields(nil, echo.H{
-		`table_id`:   ownerID,
-		`table_name`: ownerType,
-		`field_name`: `avatar`,
-		`project`:    project,
-		`used_times`: 1,
-	}, db.Cond{`id`: f.Id})
-	defer func() {
-		f.base.End(err == nil)
-	}()
-	if err != nil {
-		return err
-	}
-	err = f.RemoveUnusedAvatar(ownerType, f.Id)
-	return err
-}
-
 func (f *File) RemoveUnusedAvatar(ownerType string, excludeID uint64) error {
 	return f.DeleteBy(db.And(
-		db.Cond{`table_id`: 0},
-		db.Cond{`table_name`: ownerType},
-		db.Cond{`field_name`: `avatar`},
+		db.Cond{`subdir`: `avatar`},
 		db.Cond{`id`: db.NotEq(excludeID)},
 	))
 }
@@ -300,20 +254,6 @@ func (f *File) CondByOwner(ownerType string, ownerID uint64) db.Compound {
 		db.Cond{`owner_id`: ownerID},
 		db.Cond{`owner_type`: ownerType},
 	)
-}
-
-// CondByNoTarget 无宿主条件
-func (f *File) CondByNoTarget() db.Compound {
-	return db.Cond{`table_id`: 0}
-}
-
-// UnbindTargetData 解除宿主时的设置值
-func (f *File) UnbindTargetData() echo.H {
-	return echo.H{
-		`table_id`:   0,
-		`table_name`: ``,
-		`field_name`: ``,
-	}
 }
 
 func (f *File) DeleteBy(cond db.Compound) error {
@@ -353,27 +293,9 @@ func (f *File) DeleteBy(cond db.Compound) error {
 	return err
 }
 
-func (f *File) RemoveAvatar(ownerType string, ownerID int64) error {
-	return f.DeleteBy(db.And(
-		db.Cond{`table_id`: ownerID},
-		db.Cond{`table_name`: ownerType},
-		db.Cond{`field_name`: `avatar`},
-	))
-}
-
 func (f *File) GetAvatar() (*dbschema.NgingFile, error) {
 	m := &dbschema.NgingFile{}
 	m.CPAFrom(f.NgingFile)
-	err := m.Get(nil, db.Or(
-		db.And(
-			db.Cond{`table_id`: f.TableID()},
-			db.Cond{`table_name`: f.TableName()},
-			db.Cond{`field_name`: f.FieldName()},
-		),
-		db.And(
-			f.CondByNoTarget(),
-			db.Cond{`view_url`: f.ViewUrl},
-		),
-	))
+	err := m.Get(nil, db.Cond{`view_url`: f.ViewUrl})
 	return m, err
 }

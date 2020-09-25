@@ -28,13 +28,13 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	stdSync "sync"
 	"time"
 
 	"github.com/webx-top/com"
 	"github.com/webx-top/echo"
 
 	"github.com/admpub/color"
-	"github.com/admpub/events/emitter"
 	"github.com/admpub/log"
 	"github.com/admpub/mysql-schema-sync/sync"
 	"github.com/admpub/nging/application/library/common"
@@ -49,7 +49,7 @@ var (
 	DefaultCLIConfig      = NewCLIConfig()
 	OAuthUserSessionKey   = `oauthUser`
 	ErrUnknowDatabaseType = errors.New(`unkown database type`)
-	Emitter               = emitter.DefaultCondEmitter
+	onceUpgrade           stdSync.Once
 )
 
 func SetInstalled(lockFile string) error {
@@ -85,21 +85,37 @@ func IsInstalled() bool {
 			Installed.Bool = true
 		}
 	}
-	if Installed.Bool && Version.DBSchema > installedSchemaVer && DefaultConfig != nil {
-		var upgraded bool
-		if DefaultConfig.DB.Type == `mysql` {
-			executePreupgrade()
-			autoUpgradeDatabase()
-			upgraded = true
-		} else {
-			stdLog.Panicln(`数据库表结构需要升级！`)
-		}
-		if upgraded {
-			installedSchemaVer = Version.DBSchema
-			ioutil.WriteFile(filepath.Join(echo.Wd(), `installed.lock`), []byte(installedTime.Format(`2006-01-02 15:04:05`)+"\n"+fmt.Sprint(Version.DBSchema)), os.ModePerm)
-		}
-	}
 	return Installed.Bool
+}
+
+func OnceUpgradeDB() error {
+	onceUpgrade.Do(UpgradeDB)
+	return nil
+}
+
+func UpgradeDB() {
+	if !Installed.Bool {
+		return
+	}
+	if Version.DBSchema <= installedSchemaVer {
+		return
+	}
+	if DefaultConfig == nil {
+		return
+	}
+	var upgraded bool
+	if DefaultConfig.DB.Type == `mysql` {
+		executePreupgrade()
+		autoUpgradeDatabase()
+		upgraded = true
+	} else {
+		stdLog.Panicln(`数据库表结构需要升级！`)
+	}
+	if !upgraded {
+		return
+	}
+	installedSchemaVer = Version.DBSchema
+	ioutil.WriteFile(filepath.Join(echo.Wd(), `installed.lock`), []byte(installedTime.Format(`2006-01-02 15:04:05`)+"\n"+fmt.Sprint(Version.DBSchema)), os.ModePerm)
 }
 
 func GetSQLInstallFiles() ([]string, error) {
@@ -192,6 +208,15 @@ func autoUpgradeDatabase() {
 		Tables:     ``,
 		SkipTables: ``,
 		MailTo:     ``,
+		SQLPreprocessor: func() func(string) string {
+			charset := DefaultConfig.DB.Charset()
+			if len(charset) == 0 {
+				charset = `utf8mb4`
+			}
+			return func(sqlStr string) string {
+				return common.ReplaceCharset(sqlStr, charset)
+			}
+		}(),
 	}, nil, sync.NewMySchemaData(schema, `source`))
 	if err != nil {
 		panic(`尝试自动升级数据库失败！同步表结构时出错：` + err.Error())

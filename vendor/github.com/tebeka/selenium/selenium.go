@@ -137,13 +137,14 @@ type Proxy struct {
 	//
 	// Note that in Firefox, connections to localhost are not proxied by default,
 	// even if a proxy is set. This can be overridden via a preference setting.
-	FTP           string `json:"ftpProxy,omitempty"`
-	HTTP          string `json:"httpProxy,omitempty"`
-	SSL           string `json:"sslProxy,omitempty"`
-	SOCKS         string `json:"socksProxy,omitempty"`
-	SOCKSUsername string `json:"socksUsername,omitempty"`
-	SOCKSPassword string `json:"socksPassword,omitempty"`
-	NoProxy       string `json:"noProxy,omitempty"`
+	FTP           string   `json:"ftpProxy,omitempty"`
+	HTTP          string   `json:"httpProxy,omitempty"`
+	SSL           string   `json:"sslProxy,omitempty"`
+	SOCKS         string   `json:"socksProxy,omitempty"`
+	SOCKSVersion  int      `json:"socksVersion,omitempty"`
+	SOCKSUsername string   `json:"socksUsername,omitempty"`
+	SOCKSPassword string   `json:"socksPassword,omitempty"`
+	NoProxy       []string `json:"noProxy,omitempty"`
 
 	// The W3C draft spec includes port fields as well. According to the
 	// specification, ports can also be included in the above addresses. However,
@@ -408,4 +409,6 @@ type WebElement interface {
 	// CSSProperty returns the value of the specified CSS property of the
 	// element.
 	CSSProperty(name string) (string, error)
+	// Screenshot takes a screenshot of the attribute scroll'ing if necessary.
+	Screenshot(scroll bool) ([]byte, error)
 }

@@ -23,12 +23,11 @@ import (
 	"io"
 	"net/url"
 
-	"github.com/admpub/nging/application/registry/upload/driver/local"
-	"github.com/admpub/nging/application/registry/upload/helper"
 	"github.com/admpub/errors"
 	"github.com/admpub/goseaweedfs"
-	modelSeaweedfs "github.com/admpub/goseaweedfs/model"
 	"github.com/admpub/nging/application/registry/upload"
+	"github.com/admpub/nging/application/registry/upload/driver/local"
+	"github.com/admpub/nging/application/registry/upload/helper"
 )
 
 const Name = `seaweedfs`
@@ -36,17 +35,20 @@ const Name = `seaweedfs`
 var _ upload.Storer = &Seaweedfs{}
 
 func init() {
-	upload.StorerRegister(Name, func(ctx context.Context, typ string) (upload.Storer, error) {
-		return NewSeaweedfs(ctx, typ), nil
+	upload.StorerRegister(Name, func(ctx context.Context, subdir string) (upload.Storer, error) {
+		return NewSeaweedfs(ctx, subdir), nil
 	})
 }
 
-func NewSeaweedfs(ctx context.Context, typ string) *Seaweedfs {
-	a := DefaultConfig.New()
+func NewSeaweedfs(ctx context.Context, subdir string) *Seaweedfs {
+	a, err := DefaultConfig.New()
+	if err != nil {
+		panic(err)
+	}
 	return &Seaweedfs{
 		config:     DefaultConfig,
 		instance:   a,
-		Filesystem: local.NewFilesystem(ctx, typ),
+		Filesystem: local.NewFilesystem(ctx, subdir),
 	}
 }
 
@@ -66,8 +68,8 @@ func (s *Seaweedfs) filepath(fname string) string {
 
 func (s *Seaweedfs) xPut(dstFile string, src io.Reader, size int64) (savePath string, viewURL string, err error) {
 	savePath = s.filepath(dstFile)
-	var rs *modelSeaweedfs.FilerUploadResult
-	rs, err = s.instance.Filers[0].Upload(src, size, savePath, s.Type, s.config.TTL)
+	var rs *goseaweedfs.FilerUploadResult
+	rs, err = s.instance.Filers()[0].Upload(src, size, savePath, s.Subdir, s.config.TTL)
 	if err != nil {
 		err = errors.WithMessage(err, Name)
 		return
@@ -85,14 +87,16 @@ func (s *Seaweedfs) xPut(dstFile string, src io.Reader, size int64) (savePath st
 	return
 }
 
+/*
 func (s *Seaweedfs) xGet(dstFile string) (io.ReadCloser, error) {
-	filer := s.instance.Filers[0]
-	_, readCloser, err := filer.Download(dstFile)
+	filer := s.instance.Filers()[0]
+	_, readCloser, err := filer.Get(dstFile, nil, nil)
 	if err != nil {
 		err = errors.WithMessage(err, Name)
 	}
 	return readCloser, err
 }
+*/
 
 func (s *Seaweedfs) PublicURL(dstFile string) string {
 	return s.config.Filers[0].Public + dstFile
@@ -117,8 +121,8 @@ func (f *Seaweedfs) FixURLWithParams(content string, values url.Values, embedded
 }
 
 func (s *Seaweedfs) xDelete(dstFile string) error {
-	filer := s.instance.Filers[0]
-	err := filer.Delete(dstFile)
+	filer := s.instance.Filers()[0]
+	err := filer.Delete(dstFile, nil)
 	if err != nil {
 		err = errors.WithMessage(err, Name)
 	}
@@ -126,7 +130,7 @@ func (s *Seaweedfs) xDelete(dstFile string) error {
 }
 
 func (s *Seaweedfs) xDeleteDir(dstDir string) error {
-	err := s.instance.Filers[0].Delete(dstDir, true)
+	err := s.instance.Filers()[0].Delete(dstDir, nil)
 	if err != nil {
 		err = errors.WithMessage(err, Name)
 	}
@@ -134,14 +138,17 @@ func (s *Seaweedfs) xDeleteDir(dstDir string) error {
 }
 
 func (s *Seaweedfs) apiPut(dstFile string, src io.Reader, size int64) (fID string, viewURL string, err error) {
-	_, fID, err = s.instance.Upload(src, dstFile, size, s.Type, s.config.TTL)
+	var part *goseaweedfs.FilePart
+	part, err = s.instance.Upload(src, dstFile, size, s.Subdir, s.config.TTL)
 	if err != nil {
 		return
 	}
-	viewURL, err = s.instance.LookupFileID(fID, url.Values{}, true)
+
+	viewURL, err = s.instance.LookupFileID(part.FileID, url.Values{}, true)
 	return
 }
 
+/*
 func (s *Seaweedfs) apiGet(fileID string) (io.ReadCloser, error) {
 	_, readCloser, err := s.instance.Download(fileID, nil)
 	if err != nil {
@@ -149,6 +156,7 @@ func (s *Seaweedfs) apiGet(fileID string) (io.ReadCloser, error) {
 	}
 	return readCloser, err
 }
+*/
 
 func (s *Seaweedfs) apiDelete(fileID string) error {
 	err := s.instance.DeleteFile(fileID, nil)

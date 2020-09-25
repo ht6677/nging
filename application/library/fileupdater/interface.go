@@ -18,10 +18,27 @@
 
 package fileupdater
 
+import (
+	"github.com/webx-top/db/lib/factory"
+	"github.com/webx-top/echo"
+)
+
 type Reler interface {
 	RelationFiles(project string, table string, field string, tableID string, content string, seperator ...string) error
 	RelationEmbeddedFiles(project string, table string, field string, tableID string, content string) error
 	DeleteByTableID(project string, table string, tableID string) error
 	FileIDs() []uint64
-	MoveFileToOwner(table string, fileIDs []uint64, ownerID string) (replaces map[string]string, err error)
+	ReplacedViewURLs() map[string]string
+	Context() echo.Context
 }
+
+type Listener interface {
+	SetTableName(table string) Listener
+	Listen()
+	ListenByOptions(fieldName string, setters ...OptionSetter)
+	Add(fieldName string, setters ...OptionSetter) Listener
+	BuildOptions(fieldName string, setters ...OptionSetter) *Options
+	Delete(fieldNames ...string) Listener
+}
+
+type CallbackFunc func(m factory.Model) (tableID string, content string, property *Property)

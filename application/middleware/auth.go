@@ -23,8 +23,10 @@ import (
 	"time"
 
 	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/code"
 
 	"github.com/admpub/nging/application/handler"
+	"github.com/admpub/nging/application/library/codec"
 	"github.com/admpub/nging/application/library/common"
 	"github.com/admpub/nging/application/library/config"
 	"github.com/admpub/nging/application/library/license"
@@ -65,12 +67,14 @@ func AuthCheck(h echo.Handler) echo.HandlerFunc {
 				})
 				return h.Handle(c)
 			}
-			roleList := handler.RoleList(c)
-			roleM := model.NewUserRole(c)
+			permission, ok := c.Internal().Get(`permission`).(*model.RolePermission)
+			if !ok {
+				return common.ErrUserNoPerm
+			}
 			if checker, ok := perm.SpecialAuths[rpath]; ok {
 				var err error
 				var ret bool
-				err, ppath, ret = checker(h, c, rpath, user, roleM, roleList)
+				err, ppath, ret = checker(h, c, rpath, user, permission)
 				if ret {
 					return err
 				}
@@ -90,15 +94,12 @@ func AuthCheck(h echo.Handler) echo.HandlerFunc {
 					}
 				}
 			}
-			if !roleM.CheckPerm2(roleList, ppath) {
-				return echo.ErrForbidden
-			}
 			c.SetFunc(`CheckPerm`, func(route string) error {
 				if user.Id == 1 {
 					return nil
 				}
-				if !roleM.CheckPerm2(roleList, route) {
-					return echo.ErrForbidden
+				if !permission.Check(route) {
+					return common.ErrUserNoPerm
 				}
 				return nil
 			})
@@ -117,7 +118,7 @@ func CheckAnyPerm(c echo.Context, ppaths ...string) (err error) {
 			return nil
 		}
 	}
-	return err
+	return common.ErrUserNoPerm
 }
 
 // CheckAllPerm 检查是否匹配所有给定路径权限
@@ -134,10 +135,21 @@ func CheckAllPerm(c echo.Context, ppaths ...string) (err error) {
 func Auth(c echo.Context, saveSession bool) error {
 	user := c.Form(`user`)
 	pass := c.Form(`pass`)
-	common.DecryptedByRandomSecret(c, `loginPassword`, &pass)
+	var err error
+	pass, err = codec.DefaultSM2DecryptHex(pass)
+	if err != nil {
+		return c.NewError(code.InvalidParameter, c.T(`密码解密失败: %v`, err))
+	}
+	loginLogM := model.NewLoginLog(c)
+	loginLogM.OwnerType = `user`
+	loginLogM.Username = user
 	m := model.NewUser(c)
 	exists, err := m.CheckPasswd(user, pass)
 	if !exists {
+		loginLogM.Errpwd = pass
+		loginLogM.Failmsg = c.T(`用户不存在`)
+		loginLogM.Success = `N`
+		loginLogM.Add()
 		return c.E(`用户不存在`)
 	}
 	if err == nil {
@@ -153,7 +165,14 @@ func Auth(c echo.Context, saveSession bool) error {
 			`last_login`: m.NgingUser.LastLogin,
 			`last_ip`:    m.NgingUser.LastIp,
 		}, `id`, m.NgingUser.Id)
-		common.DeleteRandomSecret(c, `loginPassword`)
+
+		loginLogM.OwnerId = uint64(m.Id)
+		loginLogM.Success = `Y`
+	} else {
+		loginLogM.Errpwd = pass
+		loginLogM.Failmsg = err.Error()
+		loginLogM.Success = `N`
 	}
+	loginLogM.Add()
 	return err
 }

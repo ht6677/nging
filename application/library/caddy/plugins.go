@@ -20,6 +20,7 @@ package caddy
 
 import (
 	_ "github.com/caddy-plugins/caddy-expires"
+	_ "github.com/caddy-plugins/caddy-filter"
 	_ "github.com/caddy-plugins/caddy-locale"
 	_ "github.com/caddy-plugins/caddy-prometheus"
 	_ "github.com/caddy-plugins/caddy-rate-limit"
@@ -27,4 +28,5 @@ import (
 	_ "github.com/caddy-plugins/cors/caddy"
 	_ "github.com/caddy-plugins/ipfilter"
 	_ "github.com/caddy-plugins/nobots"
+	//_ "github.com/caddy-plugins/caddy-iplimit/iplimit"
 )

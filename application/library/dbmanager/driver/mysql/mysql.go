@@ -66,6 +66,7 @@ type mySQL struct {
 	version        string
 	TriggerOptions TriggerOptions
 	supportSQL     bool
+	_isV8Plus      sql.NullBool
 }
 
 func (m *mySQL) Name() string {
@@ -90,6 +91,7 @@ func (m *mySQL) Login() error {
 		Host:     m.DbAuth.Host,
 		Database: m.DbAuth.Db,
 	}
+	common.ParseMysqlConnectionURL(&settings)
 	var dbNameIsEmpty bool
 	if len(settings.Database) == 0 {
 		dbNameIsEmpty = true
@@ -167,21 +169,31 @@ func (m *mySQL) Privileges() error {
 				m.Session().AddFlash(errors.New(m.T(`root 用户不可删除`)))
 				return m.returnTo()
 			}
+			if user == m.DbAuth.Username {
+				m.Session().AddFlash(errors.New(m.T(`不可删除你自己`)))
+				return m.returnTo()
+			}
 			err = m.dropUser(user, host)
 			if err != nil {
 				m.fail(err.Error())
 			}
 			return m.returnTo(m.GenURL(`privileges`))
+
 		case `edit`:
+			oldUser := m.Query(`user`)
+			oldHost := m.Query(`host`)
 			if m.IsPost() {
-				isHashed := len(m.Form(`hashed`)) > 0
-				user := m.Form(`oldUser`)
-				host := m.Query(`host`)
+				if oldUser == m.DbAuth.Username {
+					m.Session().AddFlash(errors.New(m.T(`不可修改你自己的权限`)))
+					return m.returnTo()
+				}
+				modifyPassword := m.Formx(`modifyPassword`).Bool()
+				oldUser = m.Form(`oldUser`)
+				oldHost = m.Form(`oldHost`)
 				newHost := m.Form(`host`)
 				newUser := m.Form(`user`)
-				oldPasswd := m.Form(`oldPass`)
 				newPasswd := m.Form(`pass`)
-				err = m.editUser(user, host, newUser, newHost, oldPasswd, newPasswd, isHashed)
+				err = m.editUser(oldUser, oldHost, newUser, newHost, newPasswd, modifyPassword)
 				if err == nil {
 					m.ok(m.T(`操作成功`))
 					return m.returnTo(m.GenURL(`privileges`) + `&act=edit&user=` + url.QueryEscape(newUser) + `&host=` + url.QueryEscape(newHost))
@@ -201,36 +213,37 @@ func (m *mySQL) Privileges() error {
 				&KV{`Columns`, m.T(`列`)},
 				&KV{`Procedures`, m.T(`子程序`)},
 			})
-			user := m.Form(`user`)
-			host := m.Form(`host`)
-			var oldUser string
-			oldPass, grants, sorts, err := m.getUserGrants(host, user)
+			_, grants, sorts, err := m.getUserGrants(oldHost, oldUser)
 			if _, ok := grants["*.*"]; ok {
 				m.Set(`hasGlobalScope`, true)
 			} else {
 				m.Set(`hasGlobalScope`, false)
 			}
-			if err == nil {
-				oldUser = user
-			}
 
 			m.Set(`sorts`, sorts)
 			m.Set(`grants`, grants)
-			if oldPass != `` {
-				m.Set(`hashed`, true)
-			} else {
-				m.Set(`hashed`, false)
-			}
-			m.Set(`oldPass`, oldPass)
+			m.Set(`oldHost`, oldHost)
 			m.Set(`oldUser`, oldUser)
-			m.Request().Form().Set(`pass`, oldPass)
 			m.SetFunc(`getGrantByPrivilege`, func(grant map[string]bool, index int, group string, privilege string) bool {
 				priv := strings.ToUpper(privilege)
 				value := m.Form(fmt.Sprintf(`grants[%v][%v][%v]`, index, group, priv))
 				if len(value) > 0 && value == `1` {
 					return true
 				}
-				return grant[priv]
+				if granted, ok := grant[priv]; ok {
+					return granted
+				}
+				if priv == `ALL PRIVILEGES` && len(grant) > 0 {
+					all := true
+					for _, granted := range grant {
+						if !granted {
+							all = false
+							break
+						}
+					}
+					return all
+				}
+				return false
 			})
 			m.SetFunc(`getGrantsByKey`, func(key string) map[string]bool {
 				if vs, ok := grants[key]; ok {
@@ -244,12 +257,31 @@ func (m *mySQL) Privileges() error {
 			})
 			ret = common.Err(m.Context, err)
 			return m.Render(`db/mysql/privilege_edit`, ret)
+
+		case `modifyPassword`:
+			if m.IsPost() {
+				host := m.Form(`host`)
+				user := m.Form(`user`)
+				pass := m.Form(`pass`)
+				err = m.modifyPassword(user, host, pass)
+				data := m.Data()
+				if err != nil {
+					data.SetError(err)
+				} else {
+					data.SetInfo(m.T(`操作成功`))
+				}
+				return m.JSON(data)
+			}
 		}
 	}
 	ret = common.Err(m.Context, err)
 	isSysUser, list, err := m.listPrivileges()
 	m.Set(`isSysUser`, isSysUser)
+	m.Set(`myUsername`, m.DbAuth.Username)
 	m.Set(`list`, list)
+	m.SetFunc(`isMyself`, func(user string) bool {
+		return m.DbAuth.Username == user
+	})
 	return m.Render(`db/mysql/privileges`, ret)
 }
 func (m *mySQL) Info() error {
@@ -408,10 +440,11 @@ func (m *mySQL) CreateTable() error {
 		partitions[p] = p
 	}
 	postFields := []*Field{}
+	var collation string
 	if m.IsPost() {
 		table := m.Form(`name`)
 		engine := m.Form(`engine`)
-		collation := m.Form(`collation`)
+		collation = m.Form(`collation`)
 		autoIncrementStartValue := m.Form(`ai_start_val`)
 		autoIncrementStart := sql.NullInt64{Valid: len(autoIncrementStartValue) > 0}
 		if autoIncrementStart.Valid {
@@ -492,7 +525,7 @@ func (m *mySQL) CreateTable() error {
 			partitioning)
 		if err == nil {
 			m.ok(m.T(`添加成功`))
-			return m.returnTo(m.GenURL(`listDb`))
+			return m.returnTo(m.GenURL(`listTable`, m.dbName))
 		}
 	}
 	engines, err := m.getEngines()
@@ -501,7 +534,7 @@ func (m *mySQL) CreateTable() error {
 	m.Set(`foreignKeys`, foreignKeys)
 	m.Set(`onActions`, strings.Split(OnActions, `|`))
 	m.Set(`unsignedTags`, UnsignedTags)
-	if m.Form(`engine`) == `` {
+	if len(m.Form(`engine`)) == 0 {
 		m.Request().Form().Set(`engine`, `InnoDB`)
 	}
 	if len(postFields) == 0 {
@@ -520,6 +553,18 @@ func (m *mySQL) CreateTable() error {
 	}
 	m.Set(`supportPartitioning`, supportPartitioning)
 	m.Set(`partitionTypes`, PartitionTypes)
+	if len(collation) == 0 {
+		collations, err := m.getCollations()
+		if err != nil {
+			return err
+		}
+		collation, err := m.getCollation(m.dbName, collations)
+		if err != nil {
+			return err
+		}
+		m.Set(`collation`, collation)
+		m.Request().Form().Set("collation", collation)
+	}
 	return m.Render(`db/mysql/create_table`, err)
 }
 func (m *mySQL) ModifyTable() error {
@@ -535,7 +580,7 @@ func (m *mySQL) ModifyTable() error {
 	oldTable := m.Form(`table`)
 	if len(oldTable) < 1 {
 		m.fail(m.T(`table参数不能为空`))
-		return m.returnTo(m.GenURL(`listDb`))
+		return m.returnTo(m.GenURL(`listTable`, m.dbName))
 	}
 
 	referencablePrimary, _, err := m.referencablePrimary(``)
@@ -717,7 +762,7 @@ func (m *mySQL) ModifyTable() error {
 		if err == nil {
 			returnURLs := []string{}
 			if oldTable != table {
-				returnURLs = append(returnURLs, m.GenURL(`listDb`))
+				returnURLs = append(returnURLs, m.GenURL(`listTable`, m.dbName))
 			}
 			m.ok(m.T(`修改成功`))
 			return m.returnTo(returnURLs...)
@@ -772,6 +817,7 @@ func (m *mySQL) listTableAjax(opType string) error {
 		if err != nil {
 			data.SetError(err)
 		} else {
+			data.SetInfo(m.T(`操作成功`))
 			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
@@ -786,6 +832,7 @@ func (m *mySQL) listTableAjax(opType string) error {
 		if err != nil {
 			data.SetError(err)
 		} else {
+			data.SetInfo(m.T(`操作成功`))
 			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
@@ -803,6 +850,7 @@ func (m *mySQL) listTableAjax(opType string) error {
 		if err != nil {
 			data.SetError(err)
 		} else {
+			data.SetInfo(m.T(`操作成功`))
 			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
@@ -821,6 +869,7 @@ func (m *mySQL) listTableAjax(opType string) error {
 		if err != nil {
 			data.SetError(err)
 		} else {
+			data.SetInfo(m.T(`操作成功`))
 			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
@@ -833,6 +882,7 @@ func (m *mySQL) listTableAjax(opType string) error {
 		if err != nil {
 			data.SetError(err)
 		} else {
+			data.SetInfo(m.T(`操作成功`))
 			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
@@ -843,6 +893,27 @@ func (m *mySQL) listTableAjax(opType string) error {
 			data.SetError(err)
 		} else {
 			data.SetData(dbList)
+		}
+		return m.JSON(data)
+	case `collations`:
+		data := m.Data()
+		collations, err := m.getCollations()
+		if err != nil {
+			data.SetError(err)
+		} else {
+			data.SetData(collations.Collations)
+		}
+		return m.JSON(data)
+	case `collate`: // 更改表的字符集编码
+		tables := m.FormValues(`table[]`)
+		collate := m.Form(`collate`)
+		data := m.Data()
+		err := m.setTablesCollate(tables, collate)
+		if err != nil {
+			data.SetError(err)
+		} else {
+			data.SetInfo(m.T(`操作成功`))
+			data.SetData(m.SavedResults())
 		}
 		return m.JSON(data)
 	}
@@ -871,6 +942,15 @@ func (m *mySQL) ListTable() error {
 			return m.returnTo(m.GenURL(`listDb`))
 		}
 		m.Set(`tableStatus`, tableStatus)
+		collations, err := m.getCollations()
+		if err != nil {
+			return err
+		}
+		collation, err := m.getCollation(m.dbName, collations)
+		if err != nil {
+			return err
+		}
+		m.Set(`collation`, collation)
 	}
 	return m.Render(`db/mysql/list_table`, err)
 }

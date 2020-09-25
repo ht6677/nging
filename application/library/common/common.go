@@ -20,9 +20,11 @@ package common
 
 import (
 	stdErr "errors"
+	"fmt"
 
 	"github.com/webx-top/captcha"
 	"github.com/webx-top/echo"
+	stdCode "github.com/webx-top/echo/code"
 	"github.com/webx-top/echo/middleware/tplfunc"
 	"github.com/webx-top/echo/subdomains"
 )
@@ -91,7 +93,7 @@ func VerifyCaptcha(ctx echo.Context, hostAlias string, captchaName string, args 
 	if err != nil {
 		data.SetZone(captchaName)
 		data.SetData(CaptchaInfo(hostAlias, captchaName, args...))
-		data.SetError(err, StatusCaptchaError)
+		data.SetError(ErrCaptcha)
 	}
 	return data
 }
@@ -99,7 +101,7 @@ func VerifyCaptcha(ctx echo.Context, hostAlias string, captchaName string, args 
 // VerifyAndSetCaptcha 验证码验证并设置新验证码信息
 func VerifyAndSetCaptcha(ctx echo.Context, hostAlias string, captchaName string, args ...string) echo.Data {
 	data := VerifyCaptcha(ctx, hostAlias, captchaName, args...)
-	if data.GetCode() != StatusCaptchaError {
+	if data.GetCode() != stdCode.CaptchaError {
 		data.SetData(CaptchaInfo(hostAlias, captchaName, args...))
 	}
 	return data
@@ -122,4 +124,24 @@ func CaptchaInfo(hostAlias string, captchaName string, args ...string) echo.H {
 
 type ConfigFromDB interface {
 	ConfigFromDB() echo.H
+}
+
+func MakeMap(values ...interface{}) echo.H {
+	h := echo.H{}
+	if len(values) == 0 {
+		return h
+	}
+	var k string
+	for i, j := 0, len(values); i < j; i++ {
+		if i%2 == 0 {
+			k = fmt.Sprint(values[i])
+			continue
+		}
+		h.Set(k, values[i])
+		k = ``
+	}
+	if len(k) > 0 {
+		h.Set(k, nil)
+	}
+	return h
 }

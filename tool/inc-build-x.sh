@@ -1,23 +1,38 @@
-mkdir ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}
-xgo -go=1.13.3 -image=admpub/xgo -targets=${GOOS}/${GOARCH} -dest=../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH} -tags="bindata sqlite${BUILDTAGS}" -ldflags="-X main.BUILD_TIME=${NGING_BUILD} -X main.COMMIT=${NGING_COMMIT} -X main.VERSION=${NGING_VERSION} -X main.LABEL=${NGING_LABEL}" ../
-mv ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/${NGING_EXECUTOR}-${GOOS}-* ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/${NGING_EXECUTOR}${NGINGEX}
-mkdir ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/data
-mkdir ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/data/logs
-cp -R ../data/ip2region ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/data/ip2region
+export DISTPATH=${PKGPATH}/dist
+export RELEASEDIR=${DISTPATH}/${NGING_EXECUTOR}_${GOOS}_${GOARCH}
+if [ $GOARM != "" ]; then
+	export RELEASEDIR=${RELEASEDIR}v${GOARM}
+fi
+mkdir ${RELEASEDIR}
+xgo -go=latest -goproxy=https://goproxy.cn,direct -image=admpub/xgo -targets=${GOOS}/${GOARCH} -dest=${RELEASEDIR} -out=${NGING_EXECUTOR} -tags="bindata sqlite${BUILDTAGS}" -ldflags="-X main.BUILD_TIME=${NGING_BUILD} -X main.COMMIT=${NGING_COMMIT} -X main.VERSION=${NGING_VERSION} -X main.LABEL=${NGING_LABEL}" ./${PKGPATH}
 
-mkdir ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config
-mkdir ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/vhosts
+mv ${RELEASEDIR}/${NGING_EXECUTOR}-${GOOS}-* ${RELEASEDIR}/${NGING_EXECUTOR}${NGINGEX}
+mkdir ${RELEASEDIR}/data
+mkdir ${RELEASEDIR}/data/logs
+cp -R ${PKGPATH}/data/ip2region ${RELEASEDIR}/data/ip2region
 
-#cp -R ../config/config.yaml ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/config.yaml
-cp -R ../config/config.yaml.sample ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/config.yaml.sample
-cp -R ../config/install.* ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/
-cp -R ../config/preupgrade.* ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/
-cp -R ../config/ua.txt ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/config/ua.txt
+mkdir ${RELEASEDIR}/config
+mkdir ${RELEASEDIR}/config/vhosts
 
-export archiver_extension=zip
+#cp -R ../config/config.yaml ${RELEASEDIR}/config/config.yaml
+cp -R ${PKGPATH}/config/config.yaml.sample ${RELEASEDIR}/config/config.yaml.sample
+cp -R ${PKGPATH}/config/install.* ${RELEASEDIR}/config/
+cp -R ${PKGPATH}/config/preupgrade.* ${RELEASEDIR}/config/
+cp -R ${PKGPATH}/config/ua.txt ${RELEASEDIR}/config/ua.txt
 
-cp -R ../dist/default/* ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/
+if [ $GOOS = "windows" ]; then
+    cp -R ${PKGPATH}/support/sqlite3_${GOARCH}.dll ${RELEASEDIR}/
+	export archiver_extension=zip
+else
+	export archiver_extension=zip
+fi
+
+
+cp -R ${DISTPATH}/default/* ${RELEASEDIR}/
+
+rm -rf ${RELEASEDIR}.${archiver_extension}
+
 #${NGING_VERSION}${NGING_LABEL}
-archiver make ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}.${archiver_extension} ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}/
+arc archive ${RELEASEDIR}.${archiver_extension} ${RELEASEDIR}/
 
-rm -rf ../dist/${NGING_EXECUTOR}_${GOOS}_${GOARCH}
+rm -rf ${RELEASEDIR}

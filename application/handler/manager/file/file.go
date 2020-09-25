@@ -23,12 +23,28 @@ import (
 	"time"
 
 	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/code"
 
 	"github.com/admpub/nging/application/handler"
 	"github.com/admpub/nging/application/model/file"
+	"github.com/admpub/nging/application/registry/upload"
+	"github.com/admpub/nging/application/registry/upload/checker"
 )
 
+func setUploadURL(ctx echo.Context) error {
+	subdir := ctx.Form(`subdir`, `default`)
+	if !upload.Subdir.Has(subdir) {
+		return ctx.NewError(code.InvalidParameter, ctx.T(`无效的subdir值`))
+	}
+	ctx.Set(`subdir`, subdir)
+	ctx.Set(`uploadURL`, checker.BackendUploadURL(subdir))
+	return nil
+}
+
 func FileList(ctx echo.Context) error {
+	if err := setUploadURL(ctx); err != nil {
+		return err
+	}
 	err := List(ctx, ``, 0)
 	ctx.Set(`dialog`, false)
 	ctx.Set(`multiple`, true)

@@ -1,10 +1,15 @@
-go get github.com/admpub/xgo
-source ${PWD}/install-archiver.sh
-cd ..
-go generate
-cd tool
-
 source ${PWD}/inc-version.sh
+
+#go install github.com/admpub/xgo
+#source ${WORKDIR}/install-archiver.sh
+
+cd ../
+go generate
+
+# 回到入口
+cd ${ENTRYDIR}
+
+#echo $PWD && exit
 
 export TMPDIR=
 
@@ -13,16 +18,33 @@ export BUILDTAGS=
 
 export GOOS=linux
 export GOARCH=amd64
-source ${PWD}/inc-build-x.sh
+source ${WORKDIR}/inc-build-x.sh
 
+#exit;
+
+export GOOS=linux
+export GOARCH=arm-5
+source ${WORKDIR}/inc-build-x.sh
+
+export GOOS=linux
+export GOARCH=arm-6
+source ${WORKDIR}/inc-build-x.sh
+
+export GOOS=linux
+export GOARCH=arm-7
+source ${WORKDIR}/inc-build-x.sh
+
+export GOOS=linux
+export GOARCH=arm64
+source ${WORKDIR}/inc-build-x.sh
 
 export GOOS=linux
 export GOARCH=386
-source ${PWD}/inc-build-x.sh
+source ${WORKDIR}/inc-build-x.sh
 
 export GOOS=darwin
 export GOARCH=amd64
-source ${PWD}/inc-build-x.sh
+source ${WORKDIR}/inc-build-x.sh
 
 
 
@@ -30,8 +52,8 @@ export NGINGEX=.exe
 
 export GOOS=windows
 export GOARCH=386
-source ${PWD}/inc-build-x.sh
+source ${WORKDIR}/inc-build-x.sh
 
 export GOOS=windows
 export GOARCH=amd64
-source ${PWD}/inc-build-x.sh
+source ${WORKDIR}/inc-build-x.sh

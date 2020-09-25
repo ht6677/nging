@@ -1,5 +1,16 @@
 
-(function(win){
+(function (factory) {
+  if (typeof define === 'function' && define.amd) {
+      // AMD. Register as an anonymous module.
+      define(['jquery'], factory);
+  } else if (typeof exports === 'object') {
+      // Node/CommonJS style for Browserify
+      module.exports = factory;
+  } else {
+      // Browser globals
+      factory(jQuery);
+  }
+}(function ($) {
 function fetchOptions(elem,pid,selectedId,selectedIds,url){
   if(!url) url=BACKEND_URL+'/tool/area/index';
   $.get(url,{pid:pid},function(r){
@@ -11,6 +22,7 @@ function fetchOptions(elem,pid,selectedId,selectedIds,url){
         $(elem).remove();
         return;
       }
+      $(elem).show(h);
       var exclude = $(elem).data('exclude');
       var h = '<option value=""> - '+(App.i18n.PLEASE_SELECT?App.i18n.PLEASE_SELECT:'请选择')+' - </option>';
       for(var i=0;i<r.Data.listData.length;i++){
@@ -48,16 +60,17 @@ function bindEvent(elem,selectedIds,url){
         if(c) props+=' class="'+c+'"';
         if(target) props+=' data-target="'+target+'"';
         if(exclude) props+=' data-exclude="'+exclude+'"';
-        $(this).after('<select'+props+'></select>');
+        $(this).after('<select'+props+' style="display:none"></select>');
       }
       var selectedId='';
       if($.isArray(selectedIds) && selectedIds.length>index) selectedId=selectedIds[index];
       fetchOptions($(this).next('select')[0],v,selectedId,selectedIds,url);
   });
 }
-win.CascadeSelect = {
+window.CascadeSelect = {
   init: function(elem,selectedIds,url){
     fetchOptions(elem,0,selectedIds?selectedIds[0]:'',selectedIds,url);
   }
 };
-})(window);
+return window.CascadeSelect;
+}));

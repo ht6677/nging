@@ -8,11 +8,54 @@ import (
 type HTTPNoticerConfig struct {
 	User     string
 	Type     string
-	ClientID uint32
+	ClientID string
 	ID       interface{}
 	IsExited IsExited
 	Timeout  time.Duration
 	Mode     string
+}
+
+func NewHTTPNoticerConfig() *HTTPNoticerConfig {
+	return &HTTPNoticerConfig{}
+}
+
+func (c *HTTPNoticerConfig) SetUser(user string) *HTTPNoticerConfig {
+	c.User = user
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetType(typ string) *HTTPNoticerConfig {
+	c.Type = typ
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetClientID(clientID string) *HTTPNoticerConfig {
+	c.ClientID = clientID
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetID(id interface{}) *HTTPNoticerConfig {
+	c.ID = id
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetTimeout(t time.Duration) *HTTPNoticerConfig {
+	c.Timeout = t
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetIsExited(isExited IsExited) *HTTPNoticerConfig {
+	c.IsExited = isExited
+	return c
+}
+
+func (c *HTTPNoticerConfig) SetMode(mode string) *HTTPNoticerConfig {
+	c.Mode = mode
+	return c
+}
+
+func (c *HTTPNoticerConfig) Noticer(ctx context.Context) Noticer {
+	return NewNoticer(ctx, c)
 }
 
 func NewControlWithContext(ctx context.Context, timeout time.Duration) IsExited {

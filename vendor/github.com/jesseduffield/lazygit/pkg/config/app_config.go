@@ -3,6 +3,7 @@ package config
 import (
 	"bytes"
 	"io/ioutil"
+	"os"
 	"path/filepath"
 
 	"github.com/shibukawa/configdir"
@@ -12,14 +13,16 @@ import (
 
 // AppConfig contains the base configuration fields required for lazygit.
 type AppConfig struct {
-	Debug       bool   `long:"debug" env:"DEBUG" default:"false"`
-	Version     string `long:"version" env:"VERSION" default:"unversioned"`
-	Commit      string `long:"commit" env:"COMMIT"`
-	BuildDate   string `long:"build-date" env:"BUILD_DATE"`
-	Name        string `long:"name" env:"NAME" default:"lazygit"`
-	BuildSource string `long:"build-source" env:"BUILD_SOURCE" default:""`
-	UserConfig  *viper.Viper
-	AppState    *AppState
+	Debug         bool   `long:"debug" env:"DEBUG" default:"false"`
+	Version       string `long:"version" env:"VERSION" default:"unversioned"`
+	Commit        string `long:"commit" env:"COMMIT"`
+	BuildDate     string `long:"build-date" env:"BUILD_DATE"`
+	Name          string `long:"name" env:"NAME" default:"lazygit"`
+	BuildSource   string `long:"build-source" env:"BUILD_SOURCE" default:""`
+	UserConfig    *viper.Viper
+	UserConfigDir string
+	AppState      *AppState
+	IsNewRepo     bool
 }
 
 // AppConfigurer interface allows individual app config structs to inherit Fields
@@ -32,28 +35,37 @@ type AppConfigurer interface {
 	GetName() string
 	GetBuildSource() string
 	GetUserConfig() *viper.Viper
+	GetUserConfigDir() string
 	GetAppState() *AppState
-	WriteToUserConfig(string, string) error
+	WriteToUserConfig(string, interface{}) error
 	SaveAppState() error
 	LoadAppState() error
+	SetIsNewRepo(bool)
+	GetIsNewRepo() bool
 }
 
 // NewAppConfig makes a new app config
-func NewAppConfig(name, version, commit, date string, buildSource string, debuggingFlag *bool) (*AppConfig, error) {
-	userConfig, err := LoadConfig("config", true)
+func NewAppConfig(name, version, commit, date string, buildSource string, debuggingFlag bool) (*AppConfig, error) {
+	userConfig, userConfigPath, err := LoadConfig("config", true)
 	if err != nil {
 		return nil, err
 	}
 
+	if os.Getenv("DEBUG") == "TRUE" {
+		debuggingFlag = true
+	}
+
 	appConfig := &AppConfig{
-		Name:        "lazygit",
-		Version:     version,
-		Commit:      commit,
-		BuildDate:   date,
-		Debug:       *debuggingFlag,
-		BuildSource: buildSource,
-		UserConfig:  userConfig,
-		AppState:    &AppState{},
+		Name:          "lazygit",
+		Version:       version,
+		Commit:        commit,
+		BuildDate:     date,
+		Debug:         debuggingFlag,
+		BuildSource:   buildSource,
+		UserConfig:    userConfig,
+		UserConfigDir: filepath.Dir(userConfigPath),
+		AppState:      &AppState{},
+		IsNewRepo:     false,
 	}
 
 	if err := appConfig.LoadAppState(); err != nil {
@@ -61,6 +73,16 @@ func NewAppConfig(name, version, commit, date string, buildSource string, debugg
 	}
 
 	return appConfig, nil
+}
+
+// GetIsNewRepo returns known repo boolean
+func (c *AppConfig) GetIsNewRepo() bool {
+	return c.IsNewRepo
+}
+
+// SetIsNewRepo set if the current repo is known
+func (c *AppConfig) SetIsNewRepo(toSet bool) {
+	c.IsNewRepo = toSet
 }
 
 // GetDebug returns debug flag
@@ -104,6 +126,10 @@ func (c *AppConfig) GetAppState() *AppState {
 	return c.AppState
 }
 
+func (c *AppConfig) GetUserConfigDir() string {
+	return c.UserConfigDir
+}
+
 func newViper(filename string) (*viper.Viper, error) {
 	v := viper.New()
 	v.SetConfigType("yaml")
@@ -112,23 +138,24 @@ func newViper(filename string) (*viper.Viper, error) {
 }
 
 // LoadConfig gets the user's config
-func LoadConfig(filename string, withDefaults bool) (*viper.Viper, error) {
+func LoadConfig(filename string, withDefaults bool) (*viper.Viper, string, error) {
 	v, err := newViper(filename)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	if withDefaults {
 		if err = LoadDefaults(v, GetDefaultConfig()); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 		if err = LoadDefaults(v, GetPlatformDefaultConfig()); err != nil {
-			return nil, err
+			return nil, "", err
 		}
 	}
-	if err = LoadAndMergeFile(v, filename+".yml"); err != nil {
-		return nil, err
+	configPath, err := LoadAndMergeFile(v, filename+".yml")
+	if err != nil {
+		return nil, "", err
 	}
-	return v, nil
+	return v, configPath, nil
 }
 
 // LoadDefaults loads in the defaults defined in this file
@@ -153,22 +180,22 @@ func prepareConfigFile(filename string) (string, error) {
 }
 
 // LoadAndMergeFile Loads the config/state file, creating
-// the file as an empty one if it does not exist
-func LoadAndMergeFile(v *viper.Viper, filename string) error {
+// the file has an empty one if it does not exist
+func LoadAndMergeFile(v *viper.Viper, filename string) (string, error) {
 	configPath, err := prepareConfigFile(filename)
 	if err != nil {
-		return err
+		return "", err
 	}
 
 	v.AddConfigPath(filepath.Dir(configPath))
-	return v.MergeInConfig()
+	return configPath, v.MergeInConfig()
 }
 
 // WriteToUserConfig adds a key/value pair to the user's config and saves it
-func (c *AppConfig) WriteToUserConfig(key, value string) error {
+func (c *AppConfig) WriteToUserConfig(key string, value interface{}) error {
 	// reloading the user config directly (without defaults) so that we're not
 	// writing any defaults back to the user's config
-	v, err := LoadConfig("config", false)
+	v, _, err := LoadConfig("config", false)
 	if err != nil {
 		return err
 	}
@@ -177,7 +204,7 @@ func (c *AppConfig) WriteToUserConfig(key, value string) error {
 	return v.WriteConfig()
 }
 
-// SaveAppState marhsalls the AppState struct and writes it to the disk
+// SaveAppState marshalls the AppState struct and writes it to the disk
 func (c *AppConfig) SaveAppState() error {
 	marshalledAppState, err := yaml.Marshal(c.AppState)
 	if err != nil {
@@ -214,21 +241,157 @@ func GetDefaultConfig() []byte {
 		`gui:
   ## stuff relating to the UI
   scrollHeight: 2
+  scrollPastBottom: true
+  mouseEvents: true
+  skipUnstageLineWarning: false
+  skipStashWarning: true
+  sidePanelWidth: 0.3333
+  expandFocusedSidePanel: false
+  mainPanelSplitMode: 'flexible' # one of 'horizontal' | 'flexible' | 'vertical'
   theme:
+    lightTheme: false
     activeBorderColor:
-      - white
+      - green
       - bold
     inactiveBorderColor:
       - white
     optionsTextColor:
       - blue
+    selectedLineBgColor:
+      - default
+    selectedRangeBgColor:
+      - blue
   commitLength:
     show: true
+git:
+  paging:
+    colorArg: always
+    useConfig: false
+  merging:
+    manualCommit: false
+    args: ""
+  pull:
+    mode: 'merge' # one of 'merge' | 'rebase' | 'ff-only'
+  skipHookPrefix: 'WIP'
+  autoFetch: true
+  branchLogCmd: "git log --graph --color=always --abbrev-commit --decorate --date=relative --pretty=medium {{branchName}} --"
+  overrideGpg: false # prevents lazygit from spawning a separate process when using GPG
 update:
   method: prompt # can be: prompt | background | never
   days: 14 # how often a update is checked for
 reporting: 'undetermined' # one of: 'on' | 'off' | 'undetermined'
+splashUpdatesIndex: 0
 confirmOnQuit: false
+quitOnTopLevelReturn: true
+keybinding:
+  universal:
+    quit: 'q'
+    quit-alt1: '<c-c>'
+    return: '<esc>'
+    quitWithoutChangingDirectory: 'Q'
+    togglePanel: '<tab>'
+    prevItem: '<up>'
+    nextItem: '<down>'
+    prevItem-alt: 'k'
+    nextItem-alt: 'j'
+    prevPage: ','
+    nextPage: '.'
+    gotoTop: '<'
+    gotoBottom: '>'
+    prevBlock: '<left>'
+    nextBlock: '<right>'
+    prevBlock-alt: 'h'
+    nextBlock-alt: 'l'
+    nextMatch: 'n'
+    prevMatch: 'N'
+    startSearch: '/'
+    optionMenu: 'x'
+    optionMenu-alt1: '?'
+    select: '<space>'
+    goInto: '<enter>'
+    confirm: '<enter>'
+    confirm-alt1: 'y'
+    remove: 'd'
+    new: 'n'
+    edit: 'e'
+    openFile: 'o'
+    scrollUpMain: '<pgup>'
+    scrollDownMain: '<pgdown>'
+    scrollUpMain-alt1: 'K'
+    scrollDownMain-alt1: 'J'
+    scrollUpMain-alt2: '<c-u>'
+    scrollDownMain-alt2: '<c-d>'
+    executeCustomCommand: ':'
+    createRebaseOptionsMenu: 'm'
+    pushFiles: 'P'
+    pullFiles: 'p'
+    refresh: 'R'
+    createPatchOptionsMenu: '<c-p>'
+    nextTab: ']'
+    prevTab: '['
+    nextScreenMode: '+'
+    prevScreenMode: '_'
+    undo: 'z'
+    redo: '<c-z>'
+    filteringMenu: <c-s>
+    diffingMenu: 'W'
+    diffingMenu-alt: '<c-e>'
+    copyToClipboard: '<c-o>'
+  status:
+    checkForUpdate: 'u'
+    recentRepos: '<enter>'
+  files:
+    commitChanges: 'c'
+    commitChangesWithoutHook: 'w'
+    amendLastCommit: 'A'
+    commitChangesWithEditor: 'C'
+    ignoreFile: 'i'
+    refreshFiles: 'r'
+    stashAllChanges: 's'
+    viewStashOptions: 'S'
+    toggleStagedAll: 'a'
+    viewResetOptions: 'D'
+    fetch: 'f'
+  branches:
+    createPullRequest: 'o'
+    checkoutBranchByName: 'c'
+    forceCheckoutBranch: 'F'
+    rebaseBranch: 'r'
+    renameBranch: 'R'
+    mergeIntoCurrentBranch: 'M'
+    viewGitFlowOptions: 'i'
+    fastForward: 'f'
+    pushTag: 'P'
+    setUpstream: 'u'
+    fetchRemote: 'f'
+  commits:
+    squashDown: 's'
+    renameCommit: 'r'
+    renameCommitWithEditor: 'R'
+    viewResetOptions: 'g'
+    markCommitAsFixup: 'f'
+    createFixupCommit: 'F'
+    squashAboveCommits: 'S'
+    moveDownCommit: '<c-j>'
+    moveUpCommit: '<c-k>'
+    amendToCommit: 'A'
+    pickCommit: 'p'
+    revertCommit: 't'
+    cherryPickCopy: 'c'
+    cherryPickCopyRange: 'C'
+    pasteCommits: 'v'
+    tagCommit: 'T'
+    checkoutCommit: '<space>'
+    resetCherryPick: '<c-R>'
+  stash:
+    popStash: 'g'
+  commitFiles:
+    checkoutCommitFile: 'c'
+  main:
+    toggleDragSelect: 'v'
+    toggleDragSelect-alt: 'V'
+    toggleSelectHunk: 'a'
+    pickBothHunks: 'b'
 `)
 }
 
@@ -241,9 +404,9 @@ type AppState struct {
 
 func getDefaultAppState() []byte {
 	return []byte(`
-  lastUpdateCheck: 0
-  recentRepos: []
-`)
+    lastUpdateCheck: 0
+    recentRepos: []
+  `)
 }
 
 // // commenting this out until we use it again

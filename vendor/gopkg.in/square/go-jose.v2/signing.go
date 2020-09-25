@@ -17,6 +17,7 @@
 package jose
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/rsa"
 	"encoding/base64"
@@ -77,6 +78,27 @@ func (so *SignerOptions) WithType(typ ContentType) *SignerOptions {
 	return so.WithHeader(HeaderType, typ)
 }
 
+// WithCritical adds the given names to the critical ("crit") header and returns
+// the updated SignerOptions.
+func (so *SignerOptions) WithCritical(names ...string) *SignerOptions {
+	if so.ExtraHeaders[headerCritical] == nil {
+		so.WithHeader(headerCritical, make([]string, 0, len(names)))
+	}
+	crit := so.ExtraHeaders[headerCritical].([]string)
+	so.ExtraHeaders[headerCritical] = append(crit, names...)
+	return so
+}
+
+// WithBase64 adds a base64url-encode payload ("b64") header and returns the updated
+// SignerOptions. When the "b64" value is "false", the payload is not base64 encoded.
+func (so *SignerOptions) WithBase64(b64 bool) *SignerOptions {
+	if !b64 {
+		so.WithHeader(headerB64, b64)
+		so.WithCritical(headerB64)
+	}
+	return so
+}
+
 type payloadSigner interface {
 	signPayload(payload []byte, alg SignatureAlgorithm) (Signature, error)
 }
@@ -94,8 +116,14 @@ type genericSigner struct {
 
 type recipientSigInfo struct {
 	sigAlg    SignatureAlgorithm
-	publicKey *JSONWebKey
+	publicKey func() *JSONWebKey
 	signer    payloadSigner
+}
+
+func staticPublicKey(jwk *JSONWebKey) func() *JSONWebKey {
+	return func() *JSONWebKey {
+		return jwk
+	}
 }
 
 // NewSigner creates an appropriate signer based on the key type
@@ -146,9 +174,11 @@ func newVerifier(verificationKey interface{}) (payloadVerifier, error) {
 		return newVerifier(verificationKey.Key)
 	case *JSONWebKey:
 		return newVerifier(verificationKey.Key)
-	default:
-		return nil, ErrUnsupportedKeyType
 	}
+	if ov, ok := verificationKey.(OpaqueVerifier); ok {
+		return &opaqueVerifier{verifier: ov}, nil
+	}
+	return nil, ErrUnsupportedKeyType
 }
 
 func (ctx *genericSigner) addRecipient(alg SignatureAlgorithm, signingKey interface{}) error {
@@ -175,9 +205,11 @@ func makeJWSRecipient(alg SignatureAlgorithm, signingKey interface{}) (recipient
 		return newJWKSigner(alg, signingKey)
 	case *JSONWebKey:
 		return newJWKSigner(alg, *signingKey)
-	default:
-		return recipientSigInfo{}, ErrUnsupportedKeyType
 	}
+	if signer, ok := signingKey.(OpaqueSigner); ok {
+		return newOpaqueSigner(alg, signer)
+	}
+	return recipientSigInfo{}, ErrUnsupportedKeyType
 }
 
 func newJWKSigner(alg SignatureAlgorithm, signingKey JSONWebKey) (recipientSigInfo, error) {
@@ -185,16 +217,16 @@ func newJWKSigner(alg SignatureAlgorithm, signingKey JSONWebKey) (recipientSigIn
 	if err != nil {
 		return recipientSigInfo{}, err
 	}
-	if recipient.publicKey != nil {
+	if recipient.publicKey != nil && recipient.publicKey() != nil {
 		// recipient.publicKey is a JWK synthesized for embedding when recipientSigInfo
 		// was created for the inner key (such as a RSA or ECDSA public key). It contains
 		// the pub key for embedding, but doesn't have extra params like key id.
 		publicKey := signingKey
-		publicKey.Key = recipient.publicKey.Key
-		recipient.publicKey = &publicKey
+		publicKey.Key = recipient.publicKey().Key
+		recipient.publicKey = staticPublicKey(&publicKey)
 
 		// This should be impossible, but let's check anyway.
-		if !recipient.publicKey.IsPublic() {
+		if !recipient.publicKey().IsPublic() {
 			return recipientSigInfo{}, errors.New("square/go-jose: public key was unexpectedly not public")
 		}
 	}
@@ -211,7 +243,7 @@ func (ctx *genericSigner) Sign(payload []byte) (*JSONWebSignature, error) {
 			headerAlgorithm: string(recipient.sigAlg),
 		}
 
-		if recipient.publicKey != nil {
+		if recipient.publicKey != nil && recipient.publicKey() != nil {
 			// We want to embed the JWK or set the kid header, but not both. Having a protected
 			// header that contains an embedded JWK while also simultaneously containing the kid
 			// header is confusing, and at least in ACME the two are considered to be mutually
@@ -221,9 +253,12 @@ func (ctx *genericSigner) Sign(payload []byte) (*JSONWebSignature, error) {
 			//
 			// See https://github.com/square/go-jose/issues/157 for more context.
 			if ctx.embedJWK {
-				protected[headerJWK] = recipient.publicKey
+				protected[headerJWK] = recipient.publicKey()
 			} else {
-				protected[headerKeyID] = recipient.publicKey.KeyID
+				keyID := recipient.publicKey().KeyID
+				if keyID != "" {
+					protected[headerKeyID] = keyID
+				}
 			}
 		}
 
@@ -240,12 +275,26 @@ func (ctx *genericSigner) Sign(payload []byte) (*JSONWebSignature, error) {
 		}
 
 		serializedProtected := mustSerializeJSON(protected)
+		needsBase64 := true
 
-		input := []byte(fmt.Sprintf("%s.%s",
-			base64.RawURLEncoding.EncodeToString(serializedProtected),
-			base64.RawURLEncoding.EncodeToString(payload)))
+		if b64, ok := protected[headerB64]; ok {
+			if needsBase64, ok = b64.(bool); !ok {
+				return nil, errors.New("square/go-jose: Invalid b64 header parameter")
+			}
+		}
 
-		signatureInfo, err := recipient.signer.signPayload(input, recipient.sigAlg)
+		var input bytes.Buffer
+
+		input.WriteString(base64.RawURLEncoding.EncodeToString(serializedProtected))
+		input.WriteByte('.')
+
+		if needsBase64 {
+			input.WriteString(base64.RawURLEncoding.EncodeToString(payload))
+		} else {
+			input.Write(payload)
+		}
+
+		signatureInfo, err := recipient.signer.signPayload(input.Bytes(), recipient.sigAlg)
 		if err != nil {
 			return nil, err
 		}
@@ -287,6 +336,13 @@ func (obj JSONWebSignature) Verify(verificationKey interface{}) ([]byte, error) 
 	return obj.payload, nil
 }
 
+// UnsafePayloadWithoutVerification returns the payload without
+// verifying it. The content returned from this function cannot be
+// trusted.
+func (obj JSONWebSignature) UnsafePayloadWithoutVerification() []byte {
+	return obj.payload
+}
+
 // DetachedVerify validates a detached signature on the given payload. In
 // most cases, you will probably want to use Verify instead. DetachedVerify
 // is only useful if you have a payload and signature that are separated from
@@ -307,12 +363,18 @@ func (obj JSONWebSignature) DetachedVerify(payload []byte, verificationKey inter
 	if err != nil {
 		return err
 	}
-	if len(critical) > 0 {
-		// Unsupported crit header
+
+	for _, name := range critical {
+		if !supportedCritical[name] {
+			return ErrCryptoFailure
+		}
+	}
+
+	input, err := obj.computeAuthData(payload, &signature)
+	if err != nil {
 		return ErrCryptoFailure
 	}
 
-	input := obj.computeAuthData(payload, &signature)
 	alg := headers.getSignatureAlgorithm()
 	err = verifier.verifyPayload(input, signature.Signature, alg)
 	if err == nil {
@@ -349,18 +411,25 @@ func (obj JSONWebSignature) DetachedVerifyMulti(payload []byte, verificationKey 
 		return -1, Signature{}, err
 	}
 
+outer:
 	for i, signature := range obj.Signatures {
 		headers := signature.mergedHeaders()
 		critical, err := headers.getCritical()
 		if err != nil {
 			continue
 		}
-		if len(critical) > 0 {
-			// Unsupported crit header
+
+		for _, name := range critical {
+			if !supportedCritical[name] {
+				continue outer
+			}
+		}
+
+		input, err := obj.computeAuthData(payload, &signature)
+		if err != nil {
 			continue
 		}
 
-		input := obj.computeAuthData(payload, &signature)
 		alg := headers.getSignatureAlgorithm()
 		err = verifier.verifyPayload(input, signature.Signature, alg)
 		if err == nil {

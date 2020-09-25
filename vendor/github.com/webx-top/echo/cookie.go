@@ -22,6 +22,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/webx-top/echo/param"
 )
 
 var (
@@ -39,6 +41,9 @@ type CookieOptions struct {
 	// MaxAge>0 means Max-Age attribute present and given in seconds.
 	MaxAge int
 
+	// Expires
+	Expires time.Time
+
 	Path     string
 	Domain   string
 	Secure   bool
@@ -49,6 +54,12 @@ type CookieOptions struct {
 func (c *CookieOptions) Clone() *CookieOptions {
 	clone := *c
 	return &clone
+}
+
+func (c *CookieOptions) SetMaxAge(maxAge int) *CookieOptions {
+	c.MaxAge = maxAge
+	c.Expires = param.EmptyTime
+	return c
 }
 
 //Cookier interface
@@ -77,6 +88,7 @@ func newCookie(name string, value string, opt *CookieOptions) *Cookie {
 			Path:     opt.Path,
 			Domain:   opt.Domain,
 			MaxAge:   opt.MaxAge,
+			Expires:  opt.Expires,
 			Secure:   opt.Secure,
 			HttpOnly: opt.HttpOnly,
 		},
@@ -84,53 +96,64 @@ func newCookie(name string, value string, opt *CookieOptions) *Cookie {
 	return cookie
 }
 
-//Cookie 操作封装
+// Cookie 操作封装
 type Cookie struct {
 	cookie *http.Cookie
 }
 
-//Path 设置路径
+// Path 设置路径
 func (c *Cookie) Path(p string) *Cookie {
 	c.cookie.Path = p
 	return c
 }
 
-//Domain 设置域名
+// Domain 设置域名
 func (c *Cookie) Domain(p string) *Cookie {
 	c.cookie.Domain = p
 	return c
 }
 
-//MaxAge 设置有效时长（秒）
+// MaxAge 设置有效时长（秒）
+// IE6/7/8不支持
+// 如果同时设置了MaxAge和Expires，则优先使用MaxAge
+// 设置MaxAge则代表每次保存Cookie都会续期，因为MaxAge是基于保存时间来设置的
 func (c *Cookie) MaxAge(p int) *Cookie {
 	c.cookie.MaxAge = p
-	return c
-}
-
-//Expires 设置过期时间戳
-func (c *Cookie) Expires(p int) *Cookie {
-	c.MaxAge(p)
 	if p > 0 {
 		c.cookie.Expires = time.Unix(time.Now().Unix()+int64(p), 0)
 	} else if p < 0 {
 		c.cookie.Expires = time.Unix(1, 0)
+	} else {
+		c.cookie.Expires = param.EmptyTime
 	}
 	return c
 }
 
-//Secure 设置是否启用HTTPS
+// Expires 设置过期时间
+// 所有浏览器都支持
+// 如果仅仅设置Expires，因为过期时间是固定的，所以不会导致保存Cookie时被续期
+func (c *Cookie) Expires(expires time.Time) *Cookie {
+	if expires.IsZero() {
+		return c
+	}
+	c.cookie.MaxAge = 0
+	c.cookie.Expires = expires
+	return c
+}
+
+// Secure 设置是否启用HTTPS
 func (c *Cookie) Secure(p bool) *Cookie {
 	c.cookie.Secure = p
 	return c
 }
 
-//HttpOnly 设置是否启用HttpOnly
+// HttpOnly 设置是否启用HttpOnly
 func (c *Cookie) HttpOnly(p bool) *Cookie {
 	c.cookie.HttpOnly = p
 	return c
 }
 
-//Send 发送cookie数据到响应头
+// Send 发送cookie数据到响应头
 func (c *Cookie) Send(ctx Context) {
 	ctx.Response().SetCookie(c.cookie)
 }
@@ -148,6 +171,15 @@ func (c *cookie) Get(key string) string {
 	return val
 }
 
+// Set Set cookie value
+// @param string key
+// @param string value
+// @param int|int64|time.Duration args[0]:maxAge (seconds)
+// @param string args[1]:path (/)
+// @param string args[2]:domain
+// @param bool args[3]:secure
+// @param bool args[4]:httpOnly
+// @param string args[5]:sameSite (lax/strict/default)
 func (c *cookie) Set(key string, val string, args ...interface{}) Cookier {
 	val = url.QueryEscape(val)
 	var cookie *Cookie
@@ -184,16 +216,29 @@ func (c *cookie) Set(key string, val string, args ...interface{}) Cookier {
 		cookie.Path(ppath)
 		fallthrough
 	case 1:
-		var liftTime int
 		switch v := args[0].(type) {
+		case *http.Cookie:
+			CopyCookieOptions(v, cookie)
+		case *CookieOptions:
+			cookie.MaxAge(v.MaxAge)
+			cookie.Expires(v.Expires)
+			if len(v.Path) == 0 {
+				v.Path = `/`
+			}
+			cookie.Path(v.Path)
+			cookie.Domain(v.Domain)
+			cookie.Secure(v.Secure)
+			cookie.HttpOnly(v.HttpOnly)
+			cookie.SameSite(v.SameSite)
 		case int:
-			liftTime = v
+			cookie.MaxAge(v)
 		case int64:
-			liftTime = int(v)
+			cookie.MaxAge(int(v))
 		case time.Duration:
-			liftTime = int(v.Seconds())
+			cookie.MaxAge(int(v.Seconds()))
+		case time.Time:
+			cookie.Expires(v)
 		}
-		cookie.Expires(liftTime)
 	}
 	if !found {
 		c.cookies = append(c.cookies, cookie)

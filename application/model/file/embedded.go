@@ -47,6 +47,7 @@ func NewEmbedded(ctx echo.Context, fileMdls ...*File) *Embedded {
 		NgingFileEmbedded: &dbschema.NgingFileEmbedded{},
 		base:              base.New(ctx),
 		File:              fileM,
+		Moved:             NewMoved(ctx),
 	}
 	m.NgingFileEmbedded.SetContext(ctx)
 	return m
@@ -54,9 +55,11 @@ func NewEmbedded(ctx echo.Context, fileMdls ...*File) *Embedded {
 
 type Embedded struct {
 	*dbschema.NgingFileEmbedded
-	base    *base.Base
-	File    *File
-	updater *fileupdater.FileUpdater
+	base             *base.Base
+	File             *File
+	Moved            *Moved
+	replacedViewURLs map[string]string // viewURL => newViewURL
+	updater          *fileupdater.FileUpdater
 }
 
 func (f *Embedded) Updater(table string, field string, tableID string) *fileupdater.FileUpdater {
@@ -76,6 +79,10 @@ func (f *Embedded) FileIDs() []uint64 {
 		fileIDs = append(fileIDs, param.AsUint64(fileID))
 	}
 	return fileIDs
+}
+
+func (f *Embedded) ReplacedViewURLs() map[string]string {
+	return f.replacedViewURLs
 }
 
 // DeleteByTableID 删除嵌入文件
@@ -106,11 +113,7 @@ func (f *Embedded) DeleteByTableID(project string, table string, tableID string)
 }
 
 func (f *Embedded) UpdateByFileID(project string, table string, field string, tableID string, fileID uint64) error {
-	err := f.File.UpdateUnrelation(project, table, field, tableID, fileID)
-	if err != nil {
-		return err
-	}
-	err = f.File.Incr(fileID)
+	err := f.File.Incr(fileID)
 	if err != nil {
 		return err
 	}
@@ -142,11 +145,6 @@ func (f *Embedded) UpdateEmbedded(embedded bool, project string, table string, f
 	}()
 	f.Use(f.base.Tx())
 	f.File.Use(f.Trans())
-
-	err = f.File.UpdateUnrelation(project, table, field, tableID, fileIds...)
-	if err != nil {
-		return err
-	}
 
 	m := &dbschema.NgingFileEmbedded{}
 	err = m.Use(f.Trans()).Get(nil, db.And(
@@ -240,16 +238,38 @@ func (f *Embedded) RelationEmbeddedFiles(project string, table string, field str
 		if exists {
 			return
 		}
-		files = append(files, file)
 		if fid > 0 {
 			fids = append(fids, fid)
+		} else {
+			files = append(files, file)
 		}
 	})
-	if len(fids) < 1 && len(files) > 0 {
-		fids = f.File.GetIDByViewURLs(files)
-	}
+
+	// 仅仅提取数据库中有记录的数据
+	fids = f.FilterNotExistsFileIDs(fids, files)
+
 	err := f.UpdateEmbedded(true, project, table, field, tableID, fids...)
 	return err
+}
+
+// FilterNotExistsFileIDs 仅仅提取数据库中有记录的数据
+func (f *Embedded) FilterNotExistsFileIDs(fids []interface{}, files []interface{}) []interface{} {
+	if len(fids) > 0 {
+		fids = f.File.GetIDByIDs(fids)
+	}
+	if len(files) > 0 {
+		ids := f.File.GetIDByViewURLs(files)
+		if len(fids) > 0 {
+			for _, id := range ids {
+				if !com.InSliceIface(id, fids) {
+					fids = append(fids, id)
+				}
+			}
+		} else {
+			fids = ids
+		}
+	}
+	return fids
 }
 
 func (f *Embedded) RelationFiles(project string, table string, field string, tableID string, v string, seperator ...string) error {
@@ -257,7 +277,6 @@ func (f *Embedded) RelationFiles(project string, table string, field string, tab
 		files []interface{}
 		fids  []interface{} //旧文件ID
 	)
-	//println(`RelationFiles:`, v)
 	uploadHelper.RelatedRes(v, func(file string, fid int64) {
 		var exists bool
 		if fid > 0 {
@@ -268,14 +287,16 @@ func (f *Embedded) RelationFiles(project string, table string, field string, tab
 		if exists {
 			return
 		}
-		files = append(files, file)
 		if fid > 0 {
 			fids = append(fids, fid)
+		} else {
+			files = append(files, file)
 		}
 	}, seperator...)
-	if len(fids) < 1 && len(files) > 0 {
-		fids = f.File.GetIDByViewURLs(files)
-	}
+
+	// 仅仅提取数据库中有记录的数据
+	fids = f.FilterNotExistsFileIDs(fids, files)
+
 	err := f.UpdateEmbedded(false, project, table, field, tableID, fids...)
 	return err
 }

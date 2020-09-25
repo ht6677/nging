@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/admpub/log"
 	"github.com/admpub/nging/application/library/collector/exec"
 	"github.com/admpub/nging/application/library/collector/export"
 	"github.com/admpub/nging/application/library/cron"
@@ -72,6 +73,12 @@ func Go(k interface{}, r *exec.Rules, f func(), ctx context.Context) (err error)
 	GoProcs.Store(k, process)
 	r.SetExitedFn(process.IsExited)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Error(err)
+				process.Close(k)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			process.Close(k)

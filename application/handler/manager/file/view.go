@@ -20,10 +20,9 @@ import (
 var fileGeneratorLock = sync.RWMutex{}
 
 func File(ctx echo.Context) error {
-	uploadType := ctx.Param(`type`)
-	typ, _, _ := upload.GetTableInfo(uploadType)
+	subdir := ctx.Param(`subdir`)
 	file := ctx.Param(`*`)
-	file = filepath.Join(helper.UploadDir, typ, file)
+	file = filepath.Join(helper.UploadDir, subdir, file)
 	var (
 		convertFunc  convert.Convert
 		ok           bool
@@ -72,7 +71,7 @@ func File(ctx echo.Context) error {
 		if newStore == nil {
 			return nil, ctx.E(`存储引擎“%s”未被登记`, storerName)
 		}
-		storer, err := newStore(ctx, typ)
+		storer, err := newStore(ctx, subdir)
 		if err != nil {
 			return nil, err
 		}

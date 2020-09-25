@@ -21,7 +21,7 @@
 			return Loader.getValue(key, data);
 		});
 	};
-    Loader.include = function(file, location,once) {
+    Loader.include = function(file,location,once) {
         if (location == null) location = "head";
         if (once == null) once = true;
         if (location == "head" && typeof(Loader.data["include"]) == "undefined") {
@@ -31,17 +31,17 @@
                 before: {},
                 after: {}
             };
-            if (jsAfter.length) {
+            if (jsAfter.length>0) {
                 Loader.data.include.after.script = jsAfter;
             } else {
                 var jsBefore = $("#js-lazyload-end");
-                if (jsBefore.length) Loader.data.include.before.script = jsBefore;
+                if (jsBefore.length>0) Loader.data.include.before.script = jsBefore;
             }
-            if (cssAfter.length) {
+            if (cssAfter.length>0) {
                 Loader.data.include.after.link = cssAfter;
             } else {
                 var cssBefore = $("#css-lazyload-end");
-                if (cssBefore.length) Loader.data.include.before.link = cssBefore;
+                if (cssBefore.length>0) Loader.data.include.before.link = cssBefore;
             }
         }
         $.ajaxSetup({cache: true});
@@ -61,49 +61,53 @@
                 if (typeof(Loader.data.include.after[tag]) != 'undefined') {
                     Loader.data.include.after[tag].after(ej);
                     continue;
-                } else if (typeof(Loader.data.include.before[tag]) != 'undefined') {
+                } 
+                if (typeof(Loader.data.include.before[tag]) != 'undefined') {
                     Loader.data.include.before[tag].before(ej);
                     continue;
                 }
             }
-            $(location).append(ej);
+            try{
+                $(location).append(ej);
+            }catch(err){
+                console.error(err.message);
+                console.log(name);
+            }
         }
         $.ajaxSetup({cache: false});
     };
-    Loader.defined = function(vType, key, callback) {
+    Loader.defined = function(vType, key, callback, onloadCallback) {
         if (vType != 'undefined' || key == null) {
             if (key != null && callback != null) return callback();
             return;
         }
         if (typeof(key) == 'string' && typeof(Loader.libs[key]) != 'undefined') key = Loader.libs[key];
-        Loader.includes(key);
+        Loader.includes(key, true, onloadCallback);
         if (callback != null) return callback();
     };
-    Loader.includes = function(js,once) {
+    Loader.fullURL = function(file) {
+        var url=Loader.staticURL;
+        if (file.substring(0,1)=='#') {
+            url=Loader.assetsURL+'/js/';
+            file=file.substring(1);
+        }
+        return url+file;
+    };
+    Loader.includes = function(js,once,onloadCallback) {
         if (!js) return;
         switch (typeof(js)) {
         case 'string':
-            var url=Loader.staticURL;
-            if (js.substring(0,1)=='#') {
-                url=Loader.assetsURL+'/js/';
-                js=js.substring(1);
-            }
-            Loader.include(url + '/' + js,null,once);
-            return;
+            Loader.include(Loader.fullURL(js),null,once);
+            break;
         default:
             if (typeof(js.length) == 'undefined') return;
             var jss = [];
             for (var i = 0; i < js.length; i++) {
-                var url=Loader.staticURL;
-                var jsf=js[i];
-                if (jsf.substring(0,1)=='#') {
-                    url=Loader.assetsURL+'/js/';
-                    jsf=jsf.substring(1);
-                }
-                jss.push(url + '/' + jsf);
+                jss.push(Loader.fullURL(js[i]));
             }
             Loader.include(jss,null,once);
         }
+        if (onloadCallback != null) onloadCallback();
     };
     App.loader=Loader;
 })(App);

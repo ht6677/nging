@@ -9,6 +9,7 @@ import (
 	"github.com/admpub/events"
 	"github.com/admpub/events/emitter"
 
+	pkgCode "github.com/webx-top/echo/code"
 	"github.com/webx-top/echo/engine"
 	"github.com/webx-top/echo/logger"
 	"github.com/webx-top/echo/param"
@@ -50,7 +51,7 @@ type xContext struct {
 // NewContext creates a Context object.
 func NewContext(req engine.Request, res engine.Response, e *Echo) Context {
 	c := &xContext{
-		Validator:   DefaultNopValidate,
+		Validator:   e.Validator,
 		Translator:  DefaultNopTranslate,
 		Emitter:     emitter.DefaultCondEmitter,
 		transaction: DefaultNopTransaction,
@@ -84,6 +85,10 @@ func (c *xContext) SetStdContext(ctx context.Context) {
 
 func (c *xContext) SetEmitter(emitter events.Emitter) {
 	c.Emitter = emitter
+}
+
+func (c *xContext) Handler() Handler {
+	return c.handler
 }
 
 func (c *xContext) Deadline() (deadline time.Time, ok bool) {
@@ -127,6 +132,23 @@ func (c *xContext) Error(err error) {
 	c.echo.httpErrorHandler(err, c)
 }
 
+func (c *xContext) NewError(code pkgCode.Code, msg string, args ...interface{}) *Error {
+	return NewError(c.T(msg, args...), code)
+}
+
+func (c *xContext) NewErrorWith(err error, code pkgCode.Code, args ...interface{}) *Error {
+	var msg string
+	if len(args) > 0 {
+		msg = param.AsString(args[0])
+		if len(args) > 1 {
+			msg = c.T(msg, args[1:]...)
+		} else {
+			msg = c.T(msg)
+		}
+	}
+	return NewErrorWith(err, msg, code)
+}
+
 // Logger returns the `Logger` instance.
 func (c *xContext) Logger() logger.Logger {
 	return c.echo.logger
@@ -147,7 +169,7 @@ func (c *xContext) SetTranslator(t Translator) {
 }
 
 func (c *xContext) Reset(req engine.Request, res engine.Response) {
-	c.Validator = DefaultNopValidate
+	c.Validator = c.echo.Validator
 	c.Emitter = emitter.DefaultCondEmitter
 	c.Translator = DefaultNopTranslate
 	c.transaction = DefaultNopTransaction

@@ -29,6 +29,41 @@ func (p StringSlice) String() []string {
 	return []string(p)
 }
 
+func (p StringSlice) GetByIndex(i int, defaults ...string) string {
+	if len(p) > i {
+		return p[i]
+	}
+	if len(defaults) > 0 {
+		return defaults[0]
+	}
+	return ``
+}
+
+func (p StringSlice) Unique() StringSlice {
+	record := map[string]struct{}{}
+	result := StringSlice{}
+	for _, s := range p {
+		if _, ok := record[s]; !ok {
+			record[s] = struct{}{}
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func (p StringSlice) Filter(filterFunc func(s *string) bool) StringSlice {
+	if filterFunc == nil {
+		return p
+	}
+	result := StringSlice{}
+	for _, s := range p {
+		if filterFunc(&s) {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
 func (p StringSlice) HasValue(v interface{}) bool {
 	expected := AsString(v)
 	for _, val := range p {
@@ -37,6 +72,10 @@ func (p StringSlice) HasValue(v interface{}) bool {
 		}
 	}
 	return false
+}
+
+func (p StringSlice) Size() int {
+	return len(p)
 }
 
 func (p StringSlice) Join(sep string) string {
@@ -197,4 +236,102 @@ func (p StringSlice) Bool(filters ...func(int, bool) bool) []bool {
 		}
 	}
 	return values
+}
+
+func GetByIndex(v interface{}, i int, defaults ...interface{}) interface{} {
+	switch p := v.(type) {
+	case []string:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return ``
+	case []interface{}:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return nil
+	case []int:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []int32:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []int64:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []uint:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []uint32:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []uint64:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []float32:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []float64:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return 0
+	case []bool:
+		if len(p) > i {
+			return p[i]
+		}
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return false
+	default:
+		if len(defaults) > 0 {
+			return defaults[0]
+		}
+		return nil
+	}
 }

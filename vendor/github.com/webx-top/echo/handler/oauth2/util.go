@@ -20,6 +20,7 @@ package oauth2
 import (
 	"errors"
 	"net/url"
+	"strings"
 
 	"github.com/markbates/goth"
 	"github.com/webx-top/echo"
@@ -29,7 +30,10 @@ import (
 // we could use the echo's sessions default, but this session should be not confict with the cookie session name defined by the sessions manager
 const SessionName = "EchoGothSession"
 
-var _ goth.Params = url.Values{}
+var (
+	_         goth.Params = url.Values{}
+	EmptyUser             = goth.User{}
+)
 
 /*
 BeginAuthHandler is a convienence handler for starting the authentication process.
@@ -106,15 +110,15 @@ func GetAuthURL(ctx echo.Context) (string, error) {
 	if length > 0 {
 		switch url[0] {
 		case '/':
-			url = ctx.Site() + url
+			url = ctx.Site() + strings.TrimPrefix(url, `/`)
 		case '.':
-			url = ctx.Site() + `/` + url
+			url = ctx.Site() + url
 		default:
 			if length > 7 {
 				switch url[0:7] {
 				case `https:/`, `http://`:
 				default:
-					url = ctx.Site() + `/` + url
+					url = ctx.Site() + url
 				}
 			}
 		}
@@ -133,22 +137,28 @@ as either "provider" or url query parameter ":provider".
 var CompleteUserAuth = func(ctx echo.Context) (goth.User, error) {
 	providerName, err := GetProviderName(ctx)
 	if err != nil {
-		return goth.User{}, err
+		return EmptyUser, err
 	}
 
 	provider, err := goth.GetProvider(providerName)
 	if err != nil {
-		return goth.User{}, err
+		return EmptyUser, err
+	}
+
+	//error=invalid_request&error_description=The provided value for the input parameter 'redirect_uri' is not valid. The scope 'openid offline_access user.read' requires that the request must be sent over a secure connection using SSL.&state=state
+	errorDescription := ctx.Query(`error_description`)
+	if len(errorDescription) > 0 {
+		return EmptyUser, errors.New(providerName + `: ` + errorDescription)
 	}
 
 	sv, ok := ctx.Session().Get(SessionName).(string)
 	if !ok || len(sv) == 0 {
-		return goth.User{}, errors.New("could not find a matching session for this request")
+		return EmptyUser, errors.New("could not find a matching session for this request")
 	}
 
 	sess, err := provider.UnmarshalSession(sv)
 	if err != nil {
-		return goth.User{}, err
+		return EmptyUser, err
 	}
 
 	if cr, ok := sess.(echo.ContextRegister); ok {
@@ -158,7 +168,7 @@ var CompleteUserAuth = func(ctx echo.Context) (goth.User, error) {
 	_, err = sess.Authorize(provider, url.Values(ctx.Queries()))
 
 	if err != nil {
-		return goth.User{}, err
+		return EmptyUser, err
 	}
 
 	return provider.FetchUser(sess)

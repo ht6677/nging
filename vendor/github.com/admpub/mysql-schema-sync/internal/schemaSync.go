@@ -3,6 +3,7 @@ package internal
 import (
 	"fmt"
 	"log"
+	"regexp"
 	"strings"
 )
 
@@ -81,6 +82,38 @@ func (sc *SchemaSync) getAlterDataByTable(table string) *TableAlterData {
 	return alter
 }
 
+var (
+	intFindRegexp        = regexp.MustCompile(`(?i) [a-z]*int `)
+	charsetFind          = regexp.MustCompile(`(?i) COLLATE `)
+	intReplaceRegexp     = regexp.MustCompile(`(?i) ([a-z]*int)[^ ]+ `)
+	charsetReplaceRegexp = regexp.MustCompile(`(?i) CHARACTER SET [^ ]+( COLLATE )`)
+)
+
+func isSameSchemaItem(src, dest string) bool {
+	equal := src == dest
+	if !equal {
+		// 检查mysql8中版本差异的问题
+		if intFindRegexp.MatchString(src) {
+			if !intFindRegexp.MatchString(dest) {
+				dest = intReplaceRegexp.ReplaceAllString(dest, ` $1 `)
+			}
+		} else if intFindRegexp.MatchString(dest) {
+			if !intFindRegexp.MatchString(src) {
+				src = intReplaceRegexp.ReplaceAllString(src, ` $1 `)
+			}
+		} else {
+			if charsetFind.MatchString(src) {
+				src = charsetReplaceRegexp.ReplaceAllString(src, `$1`)
+			}
+			if charsetFind.MatchString(dest) {
+				dest = charsetReplaceRegexp.ReplaceAllString(dest, `$1`)
+			}
+		}
+		equal = src == dest
+	}
+	return equal
+}
+
 func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) string {
 	sourceMyS := alter.SchemaDiff.Source
 	destMyS := alter.SchemaDiff.Dest
@@ -93,9 +126,12 @@ func (sc *SchemaSync) getSchemaDiff(alter *TableAlterData) string {
 			log.Printf("ignore column %s.%s", table, name)
 			continue
 		}
+		if sc.Config.SQLPreprocessor() != nil {
+			dt = sc.Config.SQLPreprocessor()(dt)
+		}
 		var alterSQL string
 		if destDt, has := destMyS.Fields[name]; has {
-			if dt != destDt {
+			if !isSameSchemaItem(dt, destDt) {
 				alterSQL = fmt.Sprintf("CHANGE `%s` %s", name, dt)
 			}
 		} else {
@@ -268,15 +304,31 @@ func (sc *SchemaSync) SyncSQL4Dest(sqlStr string, sqls []string) error {
 	return err
 }
 
+func (sc *SchemaSync) Close() error {
+	if sc.DestDb != nil {
+		if err := sc.DestDb.Close(); err != nil {
+			return err
+		}
+	}
+	if sc.SourceDb != nil {
+		if err := sc.SourceDb.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // CheckSchemaDiff 执行最终的diff
 func CheckSchemaDiff(cfg *Config, dbOperators ...DBOperator) *Statics {
 	statics := newStatics(cfg)
+	sc := NewSchemaSync(cfg, dbOperators...)
+
 	defer (func() {
 		statics.timer.stop()
 		statics.sendMailNotice()
+		sc.Close()
 	})()
 
-	sc := NewSchemaSync(cfg, dbOperators...)
 	newTables := sc.SourceDb.GetTableNames()
 	log.Println("source db table total:", len(newTables))
 

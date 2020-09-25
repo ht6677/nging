@@ -148,6 +148,7 @@
         imageUpload          : false,
         imageFormats         : ["jpg", "jpeg", "gif", "png", "bmp", "webp"],
         imageUploadURL       : "",
+        imageBrowseFn        : null,
         crossDomainUpload    : false,
         uploadCallbackURL    : "",
         
@@ -298,6 +299,7 @@
                     link     : "图片链接",
                     alt      : "图片描述",
                     uploadButton     : "本地上传",
+                    browseButton     : "浏览",
                     imageURLEmpty    : "错误：图片地址不能为空。",
                     uploadFileEmpty  : "错误：上传的图片不能为空。",
                     formatNotAllowed : "错误：只允许上传图片文件，允许上传的图片文件格式有："
@@ -1246,7 +1248,7 @@
             var classPrefix         = this.classPrefix;           
             var toolbarIcons        = this.toolbarIcons = toolbar.find("." + classPrefix + "menu > li > a");  
             var toolbarIconHandlers = this.getToolbarHandles();  
-                
+
             toolbarIcons.bind(editormd.mouseOrTouch("click", "touchend"), function(event) {
 
                 var icon                = $(this).children(".fa");
@@ -1257,7 +1259,7 @@
                 if (name === "") {
                     return ;
                 }
-                
+
                 _this.activeIcon = icon;
 
                 if (typeof toolbarIconHandlers[name] !== "undefined") 
@@ -1271,7 +1273,7 @@
                         $.proxy(settings.toolbarHandlers[name], _this)(cm, icon, cursor, selection);
                     }
                 }
-                
+
                 if (name !== "link" && name !== "reference-link" && name !== "image" && name !== "code-block" && 
                     name !== "preformatted-text" && name !== "watch" && name !== "preview" && name !== "search" && name !== "fullscreen" && name !== "info") 
                 {
@@ -3517,7 +3519,7 @@
                     return "";
                 }
 
-                if (prot.indexOf("javascript:") === 0) {
+                if (prot.substring(0,11) === 'javascript:') {
                     return "";
                 }
             }
@@ -3814,12 +3816,20 @@
         }
             
         if (typeof filters !== "string") {
-            return html;
+            // return html;
+            // If no filters set use "script|on*" by default to avoid XSS
+            filters = "script|on*";
         }
 
-        var expression = filters.split("|");
+        var expression = filters.split("|"); // 过滤标签|过滤属性 
         var filterTags = expression[0].split(",");
         var attrs      = expression[1];
+
+        if(!filterTags.includes('allowScript') && !filterTags.includes('script'))
+        {
+            // Only allow script if requested specifically
+            filterTags.push('script');
+        }
 
         for (var i = 0, len = filterTags.length; i < len; i++)
         {
@@ -3829,10 +3839,26 @@
         }
         
         //return html;
+        
+        if (typeof attrs === "undefined")
+        {
+            // If no attrs set block "on*" to avoid XSS
+            attrs = "on*"
+        }
 
         if (typeof attrs !== "undefined")
         {
             var htmlTagRegex = /\<(\w+)\s*([^\>]*)\>([^\>]*)\<\/(\w+)\>/ig;
+            var base64DataRegex = /^image\/(gif|jpeg|png|webp);base64,/i;
+
+            var filterAttrs = attrs.split(",");
+            var filterOn = true;
+
+            if(filterAttrs.includes('allowOn'))
+            {
+                // Only allow on* if requested specifically
+                filterOn = false;
+            }
 
             if (attrs === "*")
             {
@@ -3840,7 +3866,7 @@
                     return "<" + $2 + ">" + $4 + "</" + $5 + ">";
                 });         
             }
-            else if (attrs === "on*")
+            else if (attrs === "on*" || filterOn)
             {
                 html = html.replace(htmlTagRegex, function($1, $2, $3, $4, $5) {
                     var el = $("<" + $2 + ">" + $4 + "</" + $5 + ">");
@@ -3852,8 +3878,17 @@
                     });
                     
                     $.each($attrs, function(i) {                        
-                        if (i.indexOf("on") === 0) {
+                        if (i.substring(0,2) == "on") {
                             delete $attrs[i];
+                        }
+                        else if (i == "src") {
+                            var v = String($attrs[i]);
+                            if(String(v.substring(0,11)).toLowerCase() === 'javascript:'){
+                                delete $attrs[i];
+                            } 
+                            else if (String(v.substring(0,5)).toLowerCase() === 'data:' && !base64DataRegex.test(v.substring(5,30))) {
+                                delete $attrs[i];
+                            }
                         }
                     });
                     
@@ -3864,10 +3899,9 @@
                     return el[0].outerHTML + text;
                 });
             }
-            else
+            if(filterAttrs.length > 1 || (filterAttrs[0]!=="*" && filterAttrs[0]!=="on*"))
             {
                 html = html.replace(htmlTagRegex, function($1, $2, $3, $4) {
-                    var filterAttrs = attrs.split(",");
                     var el = $($1);
                     el.html($4);
 
@@ -3918,7 +3952,7 @@
         
         editormd.$marked  = marked;
 
-        var div           = $("#" + id);
+        var div           = typeof(id) == 'object' ? $(id) : $("#" + id);
         var settings      = div.settings = $.extend(true, defaults, options || {});
         var saveTo        = div.find("textarea");
         
@@ -3926,7 +3960,7 @@
         {
             div.append("<textarea></textarea>");
             saveTo        = div.find("textarea");
-        }        
+        }
         
         var markdownDoc   = (settings.markdown === "") ? saveTo.val() : settings.markdown; 
         var markdownToC   = [];

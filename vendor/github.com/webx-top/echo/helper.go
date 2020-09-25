@@ -1,7 +1,9 @@
 package echo
 
 import (
+	"fmt"
 	"mime"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -9,7 +11,9 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/admpub/log"
 	"github.com/webx-top/com"
+	"github.com/webx-top/echo/encoding/json"
 )
 
 var workDir string
@@ -133,4 +137,85 @@ func static(r RouteRegister, prefix, root string) {
 	} else {
 		r.Get(prefix+"/*", h)
 	}
+}
+
+func Clear(old []interface{}, clears ...interface{}) []interface{} {
+	if len(clears) == 0 {
+		return nil
+	}
+	if len(old) == 0 {
+		return old
+	}
+	result := []interface{}{}
+	for _, el := range old {
+		var exists bool
+		for _, d := range clears {
+			if d == el {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			result = append(result, el)
+		}
+	}
+	return result
+}
+
+// Dump 输出对象和数组的结构信息
+func Dump(m interface{}, printOrNot ...bool) (r string) {
+	v, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		fmt.Printf("%v\n", err)
+	}
+	r = string(v)
+	l := len(printOrNot)
+	if l < 1 || printOrNot[0] {
+		fmt.Println(r)
+	}
+	return
+}
+
+func PanicIf(err error) {
+	if err != nil {
+		panic(err)
+	}
+}
+
+func LogIf(err error, types ...string) {
+	if err == nil {
+		return
+	}
+	var typ string
+	if len(types) > 0 {
+		typ = types[0]
+	}
+	typ = strings.Title(typ)
+	switch typ {
+	case `Fatal`:
+		log.Fatal(err)
+	case `Warn`:
+		log.Debug(err)
+	case `Debug`:
+		log.Debug(err)
+	case `Info`:
+		log.Info(err)
+	default:
+		log.Error(err)
+	}
+}
+
+func URLEncode(s string, rfc ...bool) string {
+	encoded := url.QueryEscape(s)
+	if len(rfc) > 0 && rfc[0] { // RFC 3986
+		encoded = strings.Replace(encoded, `+`, `%20`, -1)
+	}
+	return encoded
+}
+
+func URLDecode(encoded string, rfc ...bool) (string, error) {
+	if len(rfc) > 0 && rfc[0] {
+		encoded = strings.Replace(encoded, `%20`, `+`, -1)
+	}
+	return url.QueryUnescape(encoded)
 }

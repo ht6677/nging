@@ -5,45 +5,39 @@ import (
 	"path/filepath"
 
 	"github.com/fatih/color"
-	"github.com/jesseduffield/gocui"
 	"github.com/jesseduffield/lazygit/pkg/commands"
 	"github.com/jesseduffield/lazygit/pkg/utils"
 )
 
-type recentRepo struct {
-	path string
-}
-
-func (r *recentRepo) GetDisplayStrings() []string {
-	yellow := color.New(color.FgMagenta)
-	base := filepath.Base(r.path)
-	path := yellow.Sprint(r.path)
-	return []string{base, path}
-}
-
-func (gui *Gui) handleCreateRecentReposMenu(g *gocui.Gui, v *gocui.View) error {
+func (gui *Gui) handleCreateRecentReposMenu() error {
 	recentRepoPaths := gui.Config.GetAppState().RecentRepos
 	reposCount := utils.Min(len(recentRepoPaths), 20)
+	yellow := color.New(color.FgMagenta)
 	// we won't show the current repo hence the -1
-	recentRepos := make([]*recentRepo, reposCount-1)
+	menuItems := make([]*menuItem, reposCount-1)
 	for i, path := range recentRepoPaths[1:reposCount] {
-		recentRepos[i] = &recentRepo{path: path}
+		innerPath := path
+		menuItems[i] = &menuItem{
+			displayStrings: []string{
+				filepath.Base(innerPath),
+				yellow.Sprint(innerPath),
+			},
+			onPress: func() error {
+				if err := os.Chdir(innerPath); err != nil {
+					return err
+				}
+				newGitCommand, err := commands.NewGitCommand(gui.Log, gui.OSCommand, gui.Tr, gui.Config)
+				if err != nil {
+					return err
+				}
+				gui.GitCommand = newGitCommand
+				gui.State.Modes.Filtering.Path = ""
+				return gui.Errors.ErrSwitchRepo
+			},
+		}
 	}
 
-	handleMenuPress := func(index int) error {
-		repo := recentRepos[index]
-		if err := os.Chdir(repo.path); err != nil {
-			return err
-		}
-		newGitCommand, err := commands.NewGitCommand(gui.Log, gui.OSCommand, gui.Tr)
-		if err != nil {
-			return err
-		}
-		gui.GitCommand = newGitCommand
-		return gui.Errors.ErrSwitchRepo
-	}
-
-	return gui.createMenu(recentRepos, handleMenuPress)
+	return gui.createMenu(gui.Tr.SLocalize("RecentRepos"), menuItems, createMenuOptions{showCancel: true})
 }
 
 // updateRecentRepoList registers the fact that we opened lazygit in this repo,
@@ -54,16 +48,22 @@ func (gui *Gui) updateRecentRepoList() error {
 	if err != nil {
 		return err
 	}
-	gui.Config.GetAppState().RecentRepos = newRecentReposList(recentRepos, currentRepo)
+	known, recentRepos := newRecentReposList(recentRepos, currentRepo)
+	gui.Config.SetIsNewRepo(known)
+	gui.Config.GetAppState().RecentRepos = recentRepos
 	return gui.Config.SaveAppState()
 }
 
-func newRecentReposList(recentRepos []string, currentRepo string) []string {
+// newRecentReposList returns a new repo list with a new entry but only when it doesn't exist yet
+func newRecentReposList(recentRepos []string, currentRepo string) (bool, []string) {
+	isNew := true
 	newRepos := []string{currentRepo}
 	for _, repo := range recentRepos {
 		if repo != currentRepo {
 			newRepos = append(newRepos, repo)
+		} else {
+			isNew = false
 		}
 	}
-	return newRepos
+	return isNew, newRepos
 }

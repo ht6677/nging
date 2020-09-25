@@ -327,3 +327,8 @@ input[type="checkbox"] .styled:checked + label::after,
 input[type="radio"] .styled:checked + label::after {
   color: #fff;
 }
+
+.checkbox-shadow label::before
+.radio-shadow label::before{
+  box-shadow: 0 0 2px #ccc;
+}

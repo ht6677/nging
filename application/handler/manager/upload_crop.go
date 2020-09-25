@@ -27,7 +27,9 @@ import (
 	"strings"
 
 	"github.com/webx-top/com"
+	"github.com/webx-top/db"
 	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/code"
 	"github.com/webx-top/echo/middleware/tplfunc"
 	"github.com/webx-top/echo/param"
 
@@ -37,30 +39,13 @@ import (
 	"github.com/admpub/log"
 	"github.com/admpub/nging/application/handler"
 	"github.com/admpub/nging/application/library/common"
-	"github.com/admpub/nging/application/middleware"
 	modelFile "github.com/admpub/nging/application/model/file"
-	"github.com/admpub/nging/application/registry/upload"
+	uploadChecker "github.com/admpub/nging/application/registry/upload/checker"
 	"github.com/admpub/nging/application/registry/upload/convert"
+	"github.com/admpub/nging/application/registry/upload/helper"
+	uploadPrepare "github.com/admpub/nging/application/registry/upload/prepare"
+	"github.com/admpub/nging/application/registry/upload/thumb"
 )
-
-// cropPermCheckers 裁剪权限检查
-var cropPermCheckers = []func(ctx echo.Context, f *modelFile.File) error{
-	func(ctx echo.Context, f *modelFile.File) error {
-		if f.FieldName() == `avatar` && f.OwnerType == `user` {
-			err := middleware.CheckAnyPerm(ctx, `manager/user_add`, `manager/user_edit`)
-			if err != nil {
-				return err
-			}
-			return nil
-		}
-		return common.ErrNext
-	},
-}
-
-// CropPermCheckerAdd 添加裁剪权限检查逻辑
-func CropPermCheckerAdd(checker func(ctx echo.Context, f *modelFile.File) error) {
-	cropPermCheckers = append(cropPermCheckers, checker)
-}
 
 // Crop 图片裁剪
 func Crop(ctx echo.Context) error {
@@ -80,24 +65,7 @@ func Crop(ctx echo.Context) error {
 // CropByOwner 图片裁剪
 func CropByOwner(ctx echo.Context, ownerType string, ownerID uint64) error {
 	var err error
-	uploadType := ctx.Param(`type`)
-	if len(uploadType) == 0 {
-		uploadType = ctx.Form(`type`)
-	}
-	storerInfo := StorerEngine()
-	prepareData, err := upload.Prepare(ctx, uploadType, ``, storerInfo)
-	if err != nil {
-		return err
-	}
-	defer prepareData.Close()
-	subdirInfo := upload.SubdirGet(prepareData.TableName)
-	if subdirInfo == nil {
-		return ctx.E(`“%s”未被登记`, uploadType)
-	}
-
-	// 获取缩略图尺寸
-	thumbSizes := subdirInfo.ThumbSize(prepareData.FieldName)
-	cropSize := ctx.Form(`size`, `200x200`)
+	cropSize := ctx.Form(`size`, thumb.DefaultSize.String())
 	var thumbWidth, thumbHeight float64
 	cropSizeArr := strings.SplitN(cropSize, `x`, 2)
 	switch len(cropSizeArr) {
@@ -111,27 +79,49 @@ func CropByOwner(ctx echo.Context, ownerType string, ownerID uint64) error {
 		thumbWidth = param.AsFloat64(cropSizeArr[0])
 		thumbHeight = thumbWidth
 	}
-	var thumbSize *upload.ThumbSize
-	if len(thumbSizes) > 0 {
-		for _, ts := range thumbSizes {
-			if ts.Width == thumbWidth && ts.Height == thumbHeight {
-				thumbSize = &ts
-				break
-			}
-		}
-		if thumbSize == nil {
-			return ctx.E(`“%s”不支持裁剪图片`, uploadType)
-		}
-	}
 	srcURL := ctx.Form(`src`)
 	srcURL, err = com.URLDecode(srcURL)
 	if err != nil {
 		return err
 	}
 	fileM := modelFile.NewFile(ctx)
-	err = fileM.GetByViewURL(storerInfo, srcURL)
+	err = fileM.GetByViewURL(srcURL)
+	if err != nil {
+		if err == db.ErrNoMoreRows {
+			err = ctx.NewError(code.DataNotFound, ctx.T(`文件数据不存在`))
+		}
+		return err
+	}
+	if fileM.Type != `image` {
+		return ctx.NewError(code.InvalidParameter, ctx.T(`只支持裁剪图片文件`))
+	}
+	subdir := fileM.Subdir
+	if len(subdir) == 0 {
+		subdir = helper.ParseSubdir(srcURL)
+	}
+	var unlimitResize bool
+	unlimitResizeToken := ctx.Form(`token`)
+	if len(unlimitResizeToken) > 0 {
+		unlimitResize = unlimitResizeToken == uploadChecker.Token(`file`, srcURL, `width`, thumbWidth, `height`, thumbHeight)
+	}
+	storerInfo := StorerEngine()
+	prepareData, err := uploadPrepare.Prepare(ctx, subdir, ``, storerInfo)
 	if err != nil {
 		return err
+	}
+	defer prepareData.Close()
+	var thumbSize *thumb.Size
+	if !unlimitResize { // 是否检查尺寸
+		// 获取缩略图尺寸
+		thumbSize = thumb.Registry.Get(thumbWidth, thumbHeight)
+		if thumbSize == nil {
+			return ctx.E(`不支持裁剪图片尺寸: %vx%v`, thumbWidth, thumbHeight)
+		}
+	} else {
+		thumbSize = &thumb.Size{
+			Width:  thumbWidth,
+			Height: thumbHeight,
+		}
 	}
 	ctx.Internal().Set(`storerID`, fileM.StorerId)
 	storer, err := prepareData.Storer(ctx)
@@ -150,16 +140,7 @@ func CropByOwner(ctx echo.Context, ownerType string, ownerID uint64) error {
 		fileM.OwnerId == ownerID { //上传者可编辑
 		editable = true
 	} else { //其它验证方式
-		for _, check := range cropPermCheckers {
-			err := check(ctx, fileM)
-			if err == nil { //验证到权限
-				editable = true
-				break
-			}
-			if err != common.ErrNext {
-				return err
-			}
-		}
+		//editable = true //TODO: 验证
 	}
 	if !editable {
 		return common.ErrUserNoPerm
@@ -173,23 +154,26 @@ func CropByOwner(ctx echo.Context, ownerType string, ownerID uint64) error {
 	//{"x":528,"y":108,"height":864,"width":864,"rotate":0}
 	//fmt.Println(avatard)
 	opt := &imageproxy.Options{
-		CropX:          x,   //裁剪X轴起始位置
-		CropY:          y,   //裁剪Y轴起始位置
-		CropWidth:      w,   //裁剪宽度
-		CropHeight:     h,   //裁剪高度
-		Width:          200, //缩略图宽度
-		Height:         200, //缩略图高度
+		CropX:          x,                        //裁剪X轴起始位置
+		CropY:          y,                        //裁剪Y轴起始位置
+		CropWidth:      w,                        //裁剪宽度
+		CropHeight:     h,                        //裁剪高度
+		Width:          thumb.DefaultSize.Width,  //缩略图宽度
+		Height:         thumb.DefaultSize.Height, //缩略图高度
 		Fit:            false,
 		Rotate:         0,
 		FlipVertical:   false,
 		FlipHorizontal: false,
-		Quality:        100,
+		Quality:        thumb.DefaultSize.Quality,
 		Signature:      "",
 		ScaleUp:        true,
 	}
 	if thumbSize != nil {
 		opt.Width = thumbSize.Width
 		opt.Height = thumbSize.Height
+		if thumbSize.Quality > 0 {
+			opt.Quality = thumbSize.Quality
+		}
 	}
 	thumbURL := tplfunc.AddSuffix(srcURL, fmt.Sprintf(`_%v_%v`, opt.Width, opt.Height))
 	var cropped bool
@@ -298,6 +282,7 @@ END:
 		FileMD5:          fileMd5,
 		WatermarkOptions: GetWatermarkOptions(),
 	}
+	//panic(cropOpt.DestFile)
 	err = thumbM.Crop(cropOpt)
 	if err != nil {
 		return err

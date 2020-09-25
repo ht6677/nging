@@ -4,6 +4,11 @@
 {{Super}}
 <li class="active">{{"系统设置"|T}}</li>
 {{/Block}}
+
+{{Block "bodyNav"}}
+{{Include "manager/settings_body_nav"}}
+{{/Block}}
+
 {{Block "head"}}
 <link rel="stylesheet" type="text/css" href="__ASSETS__/js/selectpage/selectpage.css?t={{BuildTime}}" />
 <link rel="stylesheet" href="__ASSETS__/js/jquery.crop/css/jquery.Jcrop.min.css?t={{BuildTime}}" type="text/css" />
@@ -17,20 +22,23 @@
 <div class="row">
     <div class="col-md-12">
         <div class="tab-container">
-            <ul class="nav nav-tabs">
-            {{range $k,$v := Stored.settings}}
+            <!-- {{/*<ul class="nav nav-tabs">
+            {{- range $k,$v := Stored.settings -}}
               <li{{if eq $group $v.Group}} class="active"{{end}}>
                 <a href="?group={{$v.Group}}">{{$v.Short|T}}</a>
-                <!-- <a href="?group={{$v.Group}}" data-toggle="tab">{{$v.Short|T}}</a> -->
+                < !-- <a href="?group={{$v.Group}}" data-toggle="tab">{{$v.Short|T}}</a> -- >
               </li>
-            {{end}}
-            </ul>
+            {{- end -}}
+            </ul>*/}} -->
             <form class="form-horizontal group-border-dashed" method="POST" action="">
             <div class="tab-content">
             {{range $k,$v := Stored.settings}}
             {{if eq $group $v.Group}}
               <div class="tab-pane cont{{if eq $group $v.Group}} active{{end}}" id="{{$v.Group}}">
-                    <h3 class="hthin">{{$v.Label|T}}</h3>
+                    <h3 class="hthin">
+                      <span class="label label-default label-xs normal pull-right">{{$v.Group}}</span>
+                      {{$v.Label|T}}
+                    </h3>
                     {{- range $i,$t := $v.Tmpl -}}
                     {{- if $t -}}
                     {{Fetch $t $}}
@@ -47,7 +55,7 @@
               </div>
             </div>
             </form>
-        </div>   
+        </div>
     </div>
 </div>
 {{/Strip}}
@@ -56,19 +64,55 @@
 <script src="__ASSETS__/js/float/powerFloat.min.js?t={{BuildTime}}"></script>
 <script src="__ASSETS__/js/jquery.uploadPreviewer/jquery.uploadPreviewer.min.js?t={{BuildTime}}"></script>
 <script src="__ASSETS__/js/selectpage/selectpage.min.js?t={{BuildTime}}" type="text/javascript"></script>
-<script src="__ASSETS__/js/jquery.upload/js/vendor/jquery.ui.widget.js?t={{BuildTime}}"></script>
+<script src="__ASSETS__/js/jquery.upload/js/vendor/jquery.ui.widget.min.js?t={{BuildTime}}"></script>
 <script type="text/javascript" src="__ASSETS__/js/jquery.crop/js/jquery.Jcrop.min.js?t={{BuildTime}}"></script>
 <!-- The Iframe Transport is required for browsers without support for XHR file uploads -->
-<script src="__ASSETS__/js/jquery.upload/js/jquery.iframe-transport.js?t={{BuildTime}}"></script>
+<script src="__ASSETS__/js/jquery.upload/js/jquery.iframe-transport.min.js?t={{BuildTime}}"></script>
 <!-- The basic File Upload plugin -->
-<script src="__ASSETS__/js/jquery.upload/js/jquery.fileupload.js?t={{BuildTime}}"></script>
+<script src="__ASSETS__/js/jquery.upload/js/jquery.fileupload.min.js?t={{BuildTime}}"></script>
 <script src="__ASSETS__/js/loader/loader.min.js?t={{BuildTime}}"></script>
 <script src="__ASSETS__/js/editor/editor.min.js?t={{BuildTime}}"></script>
 <script type="text/javascript">
 $(function(){
-  App.editor.xheditors('.html-editor');
-  //App.editor.tinymces('.html-editor');
+  App.editor.xheditors('#pcont .html-editor');
+  App.editor.tinymces('#pcont .html-editor-tinymce');
+  App.editor.markdowns('#pcont .html-editor-markdown');
   App.editor.fileInput();
+  $("#body-left-navigate.nscroller:not(.has-scrollbar)").nanoScroller();
+  function getTmplTag(name){
+    if(!/\[value\]$/.test(name)){
+      name=name.replace(/\]\[value\]\[/,'.');
+    }else{
+      name=name.replace(/\]\[value\]$/,'');
+    }
+    name=name.replace(/\]\[/g,'.');
+    name=name.replace(/\]|\[/g,'.');
+    name=name.replace(/\.$/g,'');
+    return '{'+'{Config.'+name+'}'+'}';
+  }
+  $('#pcont .cl-mcont form [name*="[value]"]').each(function(){
+    if($(this).parent('.input-group').length>0){
+      var e = $(this).parent('.input-group');
+      if(e.prev('.input-group-addon').length>0){
+        e.prev('.input-group-addon').attr('data-toggle','tooltip').attr('title',getTmplTag($(this).attr('name'))).tooltip();
+        return;
+      }
+    }
+    if($(this).closest('div[class*="col-"]').length>0){
+      var e = $(this).closest('div[class*="col-"]');
+      if(e.prev('.control-label').length>0){
+        e.prev('.control-label').attr('data-toggle','tooltip').attr('title',getTmplTag($(this).attr('name'))).tooltip();
+        return;
+      }
+    }
+    if($(this).closest('.form-group').length>0){
+      var e = $(this).closest('.form-group');
+      if(e.chindren('.control-label').length>0){
+        e.chindren('.control-label').attr('data-toggle','tooltip').attr('title',getTmplTag($(this).attr('name'))).tooltip();
+        return;
+      }
+    }
+  });
 });
 </script>
 {{/Block}}

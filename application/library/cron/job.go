@@ -19,11 +19,9 @@
 package cron
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"html/template"
 	"os"
 	"os/exec"
 	"runtime/debug"
@@ -31,52 +29,59 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/admpub/nging/application/library/notice"
+	"github.com/admpub/nging/application/library/cron/send"
+	cronWriter "github.com/admpub/nging/application/library/cron/writer"
 	"github.com/webx-top/com"
+	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/code"
 	"github.com/webx-top/echo/engine"
+	"github.com/webx-top/echo/middleware/tplfunc"
+	"github.com/webx-top/echo/param"
+	"github.com/webx-top/echo/subdomains"
 
 	"github.com/admpub/log"
 	"github.com/admpub/nging/application/dbschema"
+	"github.com/admpub/nging/application/handler"
 	"github.com/admpub/nging/application/library/charset"
-	"github.com/admpub/nging/application/library/email"
 )
 
 var (
-	defaultOuputSize uint64 = 1024 * 200
-	mailTpl          *template.Template
-	defaultTmpl      = `
-	你好 {{.username}}，<br/>
+	defaultOuputSize uint64 = 2000
+	cmdPreParams     []string
 
-<p>以下是任务执行结果：</p>
+	// SYSJobs 系统Job
+	SYSJobs = map[string]Jobx{}
 
-<p>
-任务ID：{{.task_id}}<br/>
-任务名称：{{.task_name}}<br/>       
-执行时间：{{.start_time}}<br />
-执行耗时：{{.process_time}}秒<br />
-执行状态：{{.status}}
-</p>
-<p>-------------以下是任务执行输出-------------</p>
-<p>{{.output}}</p>
-<p>
---------------------------------------------<br />
-本邮件由系统自动发出，请勿回复<br />
-如果要取消邮件通知，请登录到系统进行设置<br />
-</p>
-`
-	cmdPreParams []string
-	SYSJobs      = map[string]Jobx{}
-	ErrFailure   = errors.New(`Error`)
-	//NotRecordPrefixFlag 不记录日志的前缀标识
-	NotRecordPrefixFlag = `--/ignore/--`
+	// ErrFailure 报错:执行失败
+	ErrFailure = errors.New(`Error`)
+
+	// Senders 发信程序
+	Senders = []func(param.Store) error{}
 )
 
+// AddSYSJob 添加系统Job
 func AddSYSJob(name string, fn RunnerGetter, example string, description string) {
 	SYSJobs[name] = Jobx{
 		Example:      example,
 		Description:  description,
 		RunnerGetter: fn,
 	}
+}
+
+// AddSender 添加发信程序
+func AddSender(sender func(params param.Store) error) {
+	Senders = append(Senders, sender)
+}
+
+// Send 发送通知/信件
+func Send(params param.Store) (err error) {
+	for _, sender := range Senders {
+		err = sender(params)
+		if err != nil {
+			return err
+		}
+	}
+	return err
 }
 
 type Runner func(timeout time.Duration) (out string, runingErr string, onRunErr error, isTimeout bool)
@@ -108,25 +113,6 @@ func CmdParams(command string) []string {
 	return params
 }
 
-func InitialMailTpl() {
-	tmpl := DefaultEmailConfig.Template
-	if len(tmpl) == 0 {
-		tmpl = defaultTmpl
-	}
-	var err error
-	mailTpl, err = template.New("notifyMailTmpl").Parse(tmpl)
-	if err != nil {
-		panic(err)
-	}
-}
-
-func MailTpl() *template.Template {
-	if mailTpl == nil {
-		InitialMailTpl()
-	}
-	return mailTpl
-}
-
 type Job struct {
 	id         uint                   // 任务ID
 	logID      uint64                 // 日志记录ID
@@ -141,7 +127,7 @@ type Job struct {
 
 func NewJobFromTask(ctx context.Context, task *dbschema.NgingTask) (*Job, error) {
 	if task.Id < 1 {
-		return nil, fmt.Errorf("Job: missing task.Id")
+		return nil, echo.NewError("Job: missing task.Id", code.DataNotFound)
 	}
 	var env []string
 	task.Env = strings.TrimSpace(task.Env)
@@ -164,17 +150,19 @@ func NewJobFromTask(ctx context.Context, task *dbschema.NgingTask) (*Job, error)
 			fallthrough
 		case 1:
 			fnName := cmdInfo[0]
-			if jobx, ok := SYSJobs[fnName]; ok {
-				job := &Job{
-					id:         task.Id,
-					name:       task.Name,
-					task:       task,
-					Concurrent: task.Concurrent == 1,
-					runner:     jobx.RunnerGetter(param),
-					isSYS:      true,
-				}
-				return job, nil
+			jobx, ok := SYSJobs[fnName]
+			if !ok {
+				return nil, echo.NewError(fmt.Sprintf("Job: invalid job name: %s", fnName), code.InvalidParameter)
 			}
+			job := &Job{
+				id:         task.Id,
+				name:       task.Name,
+				task:       task,
+				Concurrent: task.Concurrent == 1,
+				runner:     jobx.RunnerGetter(param),
+				isSYS:      true,
+			}
+			return job, nil
 		}
 	}
 	if task.GroupId > 0 {
@@ -273,52 +261,36 @@ func (j *Job) addAndReturningLog() *Job {
 	return j
 }
 
-func (j *Job) sendEmail(elapsed float64, t time.Time, err error, cmdOut string, isTimeout bool, timeout time.Duration) {
-	user := new(dbschema.NgingUser)
-	uerr := user.Get(nil, `id`, j.task.Uid)
-	if uerr != nil {
-		return
+func (j *Job) send(elapsed int64, t time.Time, err error, cmdOut string, isTimeout bool, timeout time.Duration) error {
+	data := param.Store{
+		"task":      *j.task,
+		"startTime": t.Format("2006-01-02 15:04:05"),
+		"elapsed":   tplfunc.NumberTrim(float64(elapsed)/1000, 6),
+		"output":    cmdOut,
 	}
-
-	var title string
-
-	data := make(map[string]interface{})
-	data["task_id"] = j.task.Id
-	data["username"] = user.Username
-	data["task_name"] = j.task.Name
-	data["start_time"] = t.Format("2006-01-02 15:04:05")
-	data["process_time"] = elapsed / 1000
-	data["output"] = cmdOut
-
+	var title, status, statusText string
 	if isTimeout {
 		title = fmt.Sprintf("任务执行结果通知 #%d: %s", j.task.Id, "超时")
-		data["status"] = fmt.Sprintf("超时（%d秒）", int(timeout/time.Second))
+		status = `timeout`
+		statusText = fmt.Sprintf("超时（%d秒）", int(timeout/time.Second))
 	} else if err != nil {
 		title = fmt.Sprintf("任务执行结果通知 #%d: %s", j.task.Id, "失败")
-		data["status"] = "失败（" + err.Error() + "）"
+		status = `failure`
+		statusText = "失败（" + err.Error() + "）"
 	} else {
 		title = fmt.Sprintf("任务执行结果通知 #%d: %s", j.task.Id, "成功")
-		data["status"] = "成功"
+		status = `success`
+		statusText = "成功"
 	}
-
-	content := new(bytes.Buffer)
-	MailTpl().Execute(content, data)
-	var ccList []string
-	if len(j.task.NotifyEmail) > 0 {
-		ccList = strings.Split(j.task.NotifyEmail, "\n")
-		for index, email := range ccList {
-			email = strings.TrimSpace(email)
-			if len(email) == 0 {
-				continue
-			}
-			ccList[index] = email
-		}
-	}
-	if err = SendMail(user.Email, user.Username, title, content.Bytes(), ccList...); err != nil {
-		log.Error(err)
-	}
+	data["title"] = title
+	data["status"] = status
+	data["statusText"] = statusText
+	data["content"] = send.NewContent()
+	data["detailURL"] = subdomains.Default.URL(handler.BackendPrefix, `backend`) + `/task/log_view/` + fmt.Sprint(j.logID)
+	return Send(data)
 }
 
+// Run 运行Job
 func (j *Job) Run() {
 	var (
 		cmdOut    string
@@ -327,33 +299,42 @@ func (j *Job) Run() {
 		isTimeout bool
 	)
 	t := time.Now()
-	tl := new(dbschema.NgingTaskLog)
-	tl.TaskId = j.id
-	tl.Created = uint(t.Unix())
+	taskLog := new(dbschema.NgingTaskLog)
+	taskLog.TaskId = j.id
+	taskLog.Created = uint(t.Unix())
 
-	j.taskLog = tl
+	j.taskLog = taskLog
 
 	defer func() {
+		taskLog.Output = cmdOut
+		taskLog.Error = cmdErr
 		if e := recover(); e != nil {
-			panicErr := fmt.Errorf(`%v`, e)
-			if len(tl.Error) > 0 {
-				tl.Error += `; ` + panicErr.Error()
+			errMsg := fmt.Sprintf(`[NGING.PANIC] %v`, e)
+			if len(taskLog.Error) > 0 {
+				taskLog.Error += "\n" + errMsg
 			} else {
-				tl.Error = panicErr.Error()
+				taskLog.Error = errMsg
 			}
 			log.Error(e, "\n", string(debug.Stack()))
+			taskLog.Status = `failure`
 		}
-		tl.Output = cmdOut
-		tl.Error = cmdErr
-		if j.task.ClosedLog == `N` && !strings.HasPrefix(cmdOut, NotRecordPrefixFlag) && !strings.HasPrefix(cmdErr, NotRecordPrefixFlag) {
+		if j == nil { // 异常情况
+			_, err = taskLog.Add()
+			if err != nil {
+				log.Error("Job: 日志写入失败: ", err)
+			}
+			return
+		}
+		if j.task.ClosedLog == `N` && !strings.HasPrefix(cmdOut, cronWriter.NotRecordPrefixFlag) && !strings.HasPrefix(cmdErr, cronWriter.NotRecordPrefixFlag) {
 			j.addAndReturningLog()
 		}
-
 	}()
 
-	if !j.Concurrent && atomic.LoadInt64(&j.status) > 0 {
-		tl.Output = fmt.Sprintf("任务[ %d. %s ]上一次执行尚未结束，本次被忽略。", j.id, j.name)
-		return
+	if !j.Concurrent {
+		if atomic.LoadInt64(&j.status) > 0 {
+			taskLog.Output = fmt.Sprintf("任务[ %d. %s ]上一次执行尚未结束，本次被忽略。", j.id, j.name)
+			return
+		}
 	}
 
 	if workPool != nil {
@@ -379,16 +360,16 @@ func (j *Job) Run() {
 	}
 
 	cmdOut, cmdErr, err, isTimeout = j.runner(timeout)
-	elapsed := time.Now().Sub(t).Seconds()
-	tl.Elapsed = uint(elapsed)
+	elapsed := time.Now().Sub(t).Milliseconds()
+	taskLog.Elapsed = uint(elapsed)
 	if isTimeout {
-		tl.Status = `timeout`
-		tl.Error = fmt.Sprintf("任务执行超过 %d 秒\n----------------------\n", int64(timeout/time.Second))
+		taskLog.Status = `timeout`
+		taskLog.Error = fmt.Sprintf("任务执行超过 %d 秒\n----------------------\n", int64(timeout/time.Second))
 	} else if err != nil {
-		tl.Status = `failure`
-		tl.Error = err.Error()
+		taskLog.Status = `failure`
+		taskLog.Error = err.Error()
 	} else {
-		tl.Status = `success`
+		taskLog.Status = `success`
 	}
 
 	// 更新上次执行时间
@@ -404,39 +385,13 @@ func (j *Job) Run() {
 
 	// 发送邮件通知
 	if (j.task.EnableNotify == 1 && err != nil) || j.task.EnableNotify == 2 {
-		j.sendEmail(elapsed, t, err, cmdOut, isTimeout, timeout)
+		out := cmdErr
+		if len(out) == 0 {
+			out = cmdOut
+		}
+		err := j.send(elapsed, t, err, out, isTimeout, timeout)
+		if err != nil {
+			log.Error(err)
+		}
 	}
-}
-
-func SendMail(toEmail string, toUsername string, title string, content []byte, ccList ...string) error {
-	return SendMailWithID(0, toEmail, toUsername, title, content, ccList...)
-}
-
-func SendMailWithID(id uint64, toEmail string, toUsername string, title string, content []byte, ccList ...string) error {
-	return SendMailWithIDAndNoticer(id, nil, toEmail, toUsername, title, content, ccList...)
-}
-
-func SendMailWithNoticer(noticer notice.Noticer, toEmail string, toUsername string, title string, content []byte, ccList ...string) error {
-	return SendMailWithIDAndNoticer(0, noticer, toEmail, toUsername, title, content, ccList...)
-}
-
-func SendMailWithIDAndNoticer(id uint64, noticer notice.Noticer, toEmail string, toUsername string, title string, content []byte, ccList ...string) error {
-	if len(toEmail) < 1 {
-		//收信人邮箱地址不正确
-		return ErrIncorrectRecipient
-	}
-	conf := &email.Config{
-		ID:         id,
-		Engine:     DefaultEmailConfig.Engine,
-		SMTP:       DefaultSMTPConfig,
-		From:       DefaultEmailConfig.Sender,
-		ToAddress:  toEmail,
-		ToUsername: toUsername,
-		Subject:    title,
-		Content:    content,
-		CcAddress:  ccList,
-		Timeout:    DefaultEmailConfig.Timeout,
-		Noticer:    noticer,
-	}
-	return email.SendMail(conf)
 }

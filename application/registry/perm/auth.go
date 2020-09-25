@@ -20,6 +20,7 @@ package perm
 
 import (
 	"github.com/admpub/nging/application/dbschema"
+	"github.com/admpub/nging/application/library/common"
 	"github.com/admpub/nging/application/model"
 	"github.com/webx-top/echo"
 )
@@ -29,8 +30,7 @@ type AuthChecker func(
 	c echo.Context,
 	rpath string,
 	user *dbschema.NgingUser,
-	roleM *model.UserRole,
-	roleList []*dbschema.NgingUserRole,
+	permission *model.RolePermission,
 ) (err error, ppath string, returning bool)
 
 var SpecialAuths = map[string]AuthChecker{
@@ -39,21 +39,23 @@ var SpecialAuths = map[string]AuthChecker{
 		c echo.Context,
 		rpath string,
 		user *dbschema.NgingUser,
-		roleM *model.UserRole,
-		roleList []*dbschema.NgingUserRole,
+		permission *model.RolePermission,
 	) (err error, ppath string, returning bool) {
 		returning = true
 		c.SetFunc(`CheckPerm`, func(id string) error {
 			if user.Id == 1 {
 				return nil
 			}
+			if permission == nil {
+				return common.ErrUserNoPerm
+			}
 			if len(id) > 0 {
-				if !roleM.CheckCmdPerm2(roleList, id) {
-					return echo.ErrForbidden
+				if !permission.CheckCmd(id) {
+					return common.ErrUserNoPerm
 				}
 			} else {
-				if !roleM.CheckPerm2(roleList, `server/cmd`) {
-					return echo.ErrForbidden
+				if !permission.Check(`server/cmd`) {
+					return common.ErrUserNoPerm
 				}
 			}
 			return nil
@@ -66,8 +68,7 @@ var SpecialAuths = map[string]AuthChecker{
 		c echo.Context,
 		rpath string,
 		user *dbschema.NgingUser,
-		roleM *model.UserRole,
-		roleList []*dbschema.NgingUserRole,
+		permission *model.RolePermission,
 	) (err error, ppath string, returning bool) {
 		ppath = `server/sysinfo`
 		return
@@ -77,14 +78,17 @@ var SpecialAuths = map[string]AuthChecker{
 		c echo.Context,
 		rpath string,
 		user *dbschema.NgingUser,
-		roleM *model.UserRole,
-		roleList []*dbschema.NgingUserRole,
+		permission *model.RolePermission,
 	) (err error, ppath string, returning bool) {
 		id := c.Form(`id`)
 		if len(id) > 0 {
 			returning = true
-			if !roleM.CheckCmdPerm2(roleList, id) {
-				err = echo.ErrForbidden
+			if permission == nil {
+				err = common.ErrUserNoPerm
+				return
+			}
+			if !permission.CheckCmd(id) {
+				err = common.ErrUserNoPerm
 				return
 			}
 			err = h.Handle(c)
@@ -98,8 +102,7 @@ var SpecialAuths = map[string]AuthChecker{
 		c echo.Context,
 		rpath string,
 		user *dbschema.NgingUser,
-		roleM *model.UserRole,
-		roleList []*dbschema.NgingUserRole,
+		permission *model.RolePermission,
 	) (err error, ppath string, returning bool) {
 		ppath = `/manager/upload/:type`
 		return

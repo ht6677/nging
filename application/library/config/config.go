@@ -74,6 +74,18 @@ type Config struct {
 	connectedDB bool
 }
 
+func (c *Config) IsEnv(env string) bool {
+	return c.Sys.IsEnv(env)
+}
+
+func (c *Config) IsEnvProd() bool {
+	return c.Sys.IsEnv(`prod`)
+}
+
+func (c *Config) IsEnvDev() bool {
+	return c.Sys.IsEnv(`dev`)
+}
+
 // ConnectedDB 数据库是否已连接，如果没有连接则自动连接
 func (c *Config) ConnectedDB(autoConn ...bool) bool {
 	if c.connectedDB {
@@ -111,9 +123,21 @@ func (c *Config) SetDebug(on bool) *Config {
 	return c
 }
 
-func (c *Config) Codec() codec.Codec {
-	return codec.Default
+func (c *Config) Codec(lengths ...int) codec.Codec {
+	length := 128
+	if len(lengths) > 0 {
+		length = lengths[0]
+	}
+	if length == 256 {
+		return default256Codec
+	}
+	return defaultCodec
 }
+
+var (
+	defaultCodec    = codec.NewAesCrypto(`AES-128-CBC`)
+	default256Codec = codec.NewAesCrypto(`AES-256-CBC`)
+)
 
 func (c *Config) Encode(raw string, keys ...string) string {
 	var key string
@@ -122,7 +146,7 @@ func (c *Config) Encode(raw string, keys ...string) string {
 	} else {
 		key = c.Cookie.HashKey
 	}
-	return codec.Default.Encode(raw, key)
+	return c.Codec().Encode(raw, key)
 }
 
 func (c *Config) Decode(encrypted string, keys ...string) string {
@@ -135,7 +159,7 @@ func (c *Config) Decode(encrypted string, keys ...string) string {
 	} else {
 		key = c.Cookie.HashKey
 	}
-	return codec.Default.Decode(encrypted, key)
+	return c.Codec().Decode(encrypted, key)
 }
 
 func (c *Config) InitSecretKey() *Config {

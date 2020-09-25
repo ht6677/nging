@@ -20,25 +20,7 @@ package file
 
 import (
 	"github.com/webx-top/db"
-	"github.com/webx-top/echo"
 )
-
-//UpdateUnrelation 更新未关联的附件
-func (f *File) UpdateUnrelation(project string, table string, field string, tableID string, fileIds ...interface{}) (err error) {
-	if len(fileIds) < 1 {
-		return nil
-	}
-	err = f.SetFields(nil, echo.H{
-		`table_id`:   tableID,
-		`table_name`: table,
-		`field_name`: field,
-		`project`:    project,
-	}, db.And(
-		f.CondByNoTarget(),
-		db.Cond{`id`: db.In(fileIds)},
-	))
-	return
-}
 
 // Incr 增加使用次数
 func (f *File) Incr(fileIds ...interface{}) (err error) {
@@ -75,6 +57,21 @@ func (f *File) GetIDByViewURLs(viewURLs []interface{}) (r []interface{}) {
 		return r.Select(`id`, `view_url`)
 	}, 0, -1, db.Cond{
 		`view_url`: db.In(viewURLs),
+	})
+	if err != nil {
+		return r
+	}
+	for _, v := range f.Objects() {
+		r = append(r, v.Id)
+	}
+	return
+}
+
+func (f *File) GetIDByIDs(ids []interface{}) (r []interface{}) {
+	_, err := f.ListByOffset(nil, func(r db.Result) db.Result {
+		return r.Select(`id`)
+	}, 0, -1, db.Cond{
+		`id`: db.In(ids),
 	})
 	if err != nil {
 		return r

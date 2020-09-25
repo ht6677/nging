@@ -20,7 +20,6 @@ package upload
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
@@ -28,6 +27,7 @@ import (
 	"strings"
 
 	"github.com/admpub/checksum"
+	"github.com/admpub/errors"
 	"github.com/webx-top/echo"
 	"github.com/webx-top/echo/engine"
 )
@@ -61,6 +61,14 @@ func WrapFileWithSize(size int64, file multipart.File) ReadCloserWithSize {
 
 type wrapBodyWithSize struct {
 	engine.Request
+	body io.ReadCloser
+}
+
+func (w *wrapBodyWithSize) Body() io.ReadCloser {
+	if w.body == nil {
+		w.body = w.Request.Body()
+	}
+	return w.body
 }
 
 func (w *wrapBodyWithSize) Read(p []byte) (n int, err error) {
@@ -80,6 +88,7 @@ func (w *wrapBodyWithSize) Md5() (md5 string, err error) {
 	w.Body().Close()
 	defer func() {
 		w.SetBody(bytes.NewReader(b))
+		w.body = nil
 	}()
 	md5, err = checksum.MD5sumReader(bytes.NewReader(b))
 	return
@@ -129,6 +138,7 @@ func Receive(name string, ctx echo.Context) (f ReadCloserWithSize, fileName stri
 		var file multipart.File
 		file, header, err = ctx.Request().FormFile(name)
 		if err != nil {
+			err = errors.WithMessage(err, name)
 			return
 		}
 		fileName = header.Filename

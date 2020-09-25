@@ -31,6 +31,7 @@ import (
 	"github.com/webx-top/echo/subdomains"
 
 	"github.com/admpub/nging/application/dbschema"
+	"github.com/admpub/nging/application/library/codec"
 	"github.com/admpub/nging/application/library/common"
 	"github.com/admpub/nging/application/library/config"
 	"github.com/admpub/nging/application/library/license"
@@ -38,14 +39,21 @@ import (
 	"github.com/admpub/nging/application/model"
 	"github.com/admpub/nging/application/registry/dashboard"
 	"github.com/admpub/nging/application/registry/navigate"
-	"github.com/admpub/nging/application/registry/upload"
+	"github.com/admpub/nging/application/registry/upload/checker"
 	"github.com/admpub/nging/application/registry/upload/helper"
 )
 
-var DefaultAvatarURL = `/public/assets/backend/images/user_128.png`
+var (
+	DefaultAvatarURL = `/public/assets/backend/images/user_128.png`
+	EmptyURL         = url.URL{}
+)
 
 func ErrorPageFunc(c echo.Context) error {
+	c.SetFunc(`Context`, func() echo.Context {
+		return c
+	})
 	c.SetFunc(`URLFor`, subdomains.Default.URL)
+	c.SetFunc(`URLByName`, subdomains.Default.URLByName)
 	c.SetFunc(`IsMessage`, common.IsMessage)
 	c.SetFunc(`Stored`, c.Stored)
 	c.SetFunc(`Languages`, func() []string {
@@ -91,10 +99,21 @@ func ErrorPageFunc(c echo.Context) error {
 	c.Internal().Set(`siteURI`, siteURI)
 	c.SetFunc(`SiteURI`, func() url.URL {
 		if siteURI == nil {
-			return url.URL{}
+			return EmptyURL
 		}
 		return *siteURI
 	})
+	c.SetFunc(`GetReturnURL`, func(varNames ...string) string {
+		return common.GetReturnURL(c, varNames...)
+	})
+	c.SetFunc(`ReturnToCurrentURL`, func(varNames ...string) string {
+		return common.ReturnToCurrentURL(c, varNames...)
+	})
+	c.SetFunc(`WithReturnURL`, func(urlStr string, varNames ...string) string {
+		return common.WithReturnURL(c, urlStr, varNames...)
+	})
+	c.SetFunc(`WithURLParams`, common.WithURLParams)
+	c.SetFunc(`MakeMap`, common.MakeMap)
 	return nil
 }
 
@@ -108,9 +127,9 @@ func FuncMap() echo.MiddlewareFunc {
 			c.SetFunc(`UnixTime`, now.Local().Unix)
 			c.SetFunc(`HasString`, hasString)
 			c.SetFunc(`Date`, date)
-			c.SetFunc(`Token`, upload.Token)
-			c.SetFunc(`BackendUploadURL`, upload.BackendUploadURL)
-			c.SetFunc(`FrontendUploadURL`, upload.FrontendUploadURL)
+			c.SetFunc(`Token`, checker.Token)
+			c.SetFunc(`BackendUploadURL`, checker.BackendUploadURL)
+			c.SetFunc(`FrontendUploadURL`, checker.FrontendUploadURL)
 			c.SetFunc(`Modal`, func(data interface{}) template.HTML {
 				return modal.Render(c, data)
 			})
@@ -119,16 +138,6 @@ func FuncMap() echo.MiddlewareFunc {
 
 			if !config.DefaultConfig.ConnectedDB(false) {
 				return h.Handle(c)
-			}
-			//用户相关函数
-			user, _ := c.Session().Get(`user`).(*dbschema.NgingUser)
-			roleM := model.NewUserRole(c)
-			var roleList []*dbschema.NgingUserRole
-			if user != nil {
-				c.Set(`user`, user)
-				c.SetFunc(`Username`, func() string { return user.Username })
-				roleList = roleM.ListByUser(user)
-				c.Set(`roleList`, roleList)
 			}
 			c.SetFunc(`Avatar`, func(avatar string, defaults ...string) string {
 				if len(avatar) > 0 {
@@ -144,6 +153,35 @@ func FuncMap() echo.MiddlewareFunc {
 			c.SetFunc(`Project`, func(ident string) *navigate.ProjectItem {
 				return navigate.ProjectGet(ident)
 			})
+
+			c.SetFunc(`ProjectSearchIdent`, func(ident string) int {
+				return navigate.ProjectSearchIdent(ident)
+			})
+			c.SetFunc(`Projects`, func() navigate.ProjectList {
+				return navigate.ProjectListAll()
+			})
+			c.SetFunc(`SM2PublicKey`, codec.DefaultPublicKeyHex)
+			return h.Handle(c)
+		})
+	}
+}
+
+func BackendFuncMap() echo.MiddlewareFunc {
+	return func(h echo.Handler) echo.Handler {
+		return echo.HandlerFunc(func(c echo.Context) error {
+
+			//用户相关函数
+			user, _ := c.Session().Get(`user`).(*dbschema.NgingUser)
+			roleM := model.NewUserRole(c)
+			var roleList []*dbschema.NgingUserRole
+			if user != nil {
+				c.Set(`user`, user)
+				c.SetFunc(`Username`, func() string { return user.Username })
+				roleList = roleM.ListByUser(user)
+				c.Set(`roleList`, roleList)
+			}
+			permission := model.NewPermission().Init(roleList)
+			c.Internal().Set(`permission`, permission)
 			var projectIdent string
 			getProjectIdent := func() string {
 				if len(projectIdent) == 0 {
@@ -157,19 +195,13 @@ func FuncMap() echo.MiddlewareFunc {
 				return projectIdent
 			}
 			c.SetFunc(`ProjectIdent`, getProjectIdent)
-			c.SetFunc(`ProjectSearchIdent`, func(ident string) int {
-				return navigate.ProjectSearchIdent(ident)
-			})
-			c.SetFunc(`Projects`, func() navigate.ProjectList {
-				return navigate.ProjectListAll()
-			})
 			c.SetFunc(`TopButtons`, func() dashboard.TopButtons {
-				buttons := dashboard.TopButtonAll()
+				buttons := dashboard.TopButtonAll(c)
 				buttons.Ready(c)
 				return buttons
 			})
 			c.SetFunc(`GlobalFooters`, func() dashboard.GlobalFooters {
-				footers := dashboard.GlobalFooterAll()
+				footers := dashboard.GlobalFooterAll(c)
 				footers.Ready(c)
 				return footers
 			})
@@ -182,7 +214,7 @@ func FuncMap() echo.MiddlewareFunc {
 						}
 						return *navigate.TopNavigate
 					}
-					return roleM.FilterNavigate(roleList, navigate.TopNavigate)
+					return permission.FilterNavigate(navigate.TopNavigate)
 				case `left`:
 					fallthrough
 				default:
@@ -199,7 +231,7 @@ func FuncMap() echo.MiddlewareFunc {
 						}
 						return *leftNav
 					}
-					return roleM.FilterNavigate(roleList, leftNav)
+					return permission.FilterNavigate(leftNav)
 				}
 			})
 			return h.Handle(c)

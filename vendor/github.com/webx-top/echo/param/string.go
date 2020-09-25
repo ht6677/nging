@@ -24,7 +24,7 @@ import (
 	"time"
 )
 
-var emptyTime = time.Time{}
+var EmptyTime = time.Time{}
 
 type String string
 
@@ -141,7 +141,7 @@ func (p String) Timestamp() time.Time {
 		}
 		return time.Unix(sec, nsec)
 	}
-	return emptyTime
+	return EmptyTime
 }
 
 func (p String) DateTime(layouts ...string) time.Time {
@@ -150,8 +150,8 @@ func (p String) DateTime(layouts ...string) time.Time {
 		if len(layouts) > 0 {
 			layout = layouts[0]
 		}
-		t, _ := time.Parse(layout, p.String())
+		t, _ := time.ParseInLocation(layout, p.String(), time.Local)
 		return t
 	}
-	return emptyTime
+	return EmptyTime
 }

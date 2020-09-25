@@ -93,24 +93,10 @@ func EncodeConfigValue(_v *echo.Mapx, v *dbschema.NgingConfig, encoder Encoder) 
 
 func DefaultEncoder(v *dbschema.NgingConfig, value string) string {
 	switch v.Type {
-	case `html`, `markdown`:
-		value = common.RemoveXSS(value)
-
-	case `url`, `image`, `video`, `audio`, `file`:
-		value = common.MyCleanText(value)
-
-	case `id`, `text`:
-		value = com.StripTags(value)
-
-	case `json`:
-		// pass
-
-	case `list`:
-		value = strings.TrimSpace(value)
-		value = strings.Trim(value, `,`)
-
+	case `html`, `text`:
+		// 配置数据为后台输入，不用过滤XSS
 	default:
-		value = com.StripTags(value)
+		value = common.ContentEncode(value, v.Type)
 	}
 	if v.Encrypted == `Y` {
 		value = echo.Get(`DefaultConfig`).(Codec).Encode(value)

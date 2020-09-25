@@ -1,5 +1,12 @@
-App.loader.libs.editormdPreview = ['#editor/markdown/lib/marked.min.js', '#editor/markdown/lib/prettify.min.js', '#editor/markdown/lib/raphael.min.js', '#editor/markdown/lib/underscore.min.js', '#editor/markdown/css/editormd.preview.min.css', '#editor/markdown/editormd.min.js'];
-App.loader.libs.editormd = ['#editor/markdown/css/editormd.min.css', '#editor/markdown/editormd.min.js'];
+App.loader.libs.editormdPreview = [
+	'#editor/markdown/lib/marked.min.js', 
+	'#editor/markdown/lib/prettify.min.js', 
+	'#editor/markdown/lib/raphael.min.js', 
+	'#editor/markdown/lib/underscore.min.js',  
+	'#editor/markdown/css/editormd.preview.min.css',
+	'#editor/markdown/editormd.min.js'
+];
+App.loader.libs.editormd = ['#editor/markdown/css/editormd.min.css', '#editor/markdown/css/editormd.preview.min.css', '#editor/markdown/editormd.min.js'];
 App.loader.libs.flowChart = ['#editor/markdown/lib/flowchart.min.js', '#editor/markdown/lib/jquery.flowchart.min.js'];
 App.loader.libs.sequenceDiagram = ['#editor/markdown/lib/sequence-diagram.min.js'];
 App.loader.libs.xheditor = ['#editor/xheditor/xheditor.min.js', '#editor/xheditor/xheditor_lang/' + App.lang + '.js'];
@@ -12,58 +19,33 @@ App.loader.libs.markdownit = ['#markdown/it/markdown-it.min.js', '#markdown/it/p
 App.loader.libs.codehighlight = ['#markdown/it/plugins/highlight/loader/prettify.js', '#markdown/it/plugins/highlight/loader/run_prettify.js?skin=sons-of-obsidian'];
 App.loader.libs.powerFloat = ['#float/powerFloat.min.css', '#float/powerFloat.min.js'];
 App.loader.libs.uploadPreviewer = ['#jquery.uploadPreviewer/css/jquery.uploadPreviewer.min.css', '#jquery.uploadPreviewer/jquery.uploadPreviewer.min.js'];
+App.loader.libs.fileUpload = [
+	'#jquery.upload/js/vendor/jquery.ui.widget.min.js',
+	'#jquery.upload/js/jquery.iframe-transport.min.js',
+	'#jquery.upload/js/jquery.fileupload.min.js',
+	'#jquery.upload/js/jquery.fileupload-process.min.js'
+];
+App.loader.libs.jcrop = ['#jquery.crop/css/jquery.Jcrop.min.css','#jquery.crop/js/jquery.Jcrop.min.js'];
+App.loader.libs.cropImage = ['#jquery.crop/css/jquery.Jcrop.min.css','#jquery.crop/js/jquery.Jcrop.min.js','#behavior/page/crop-image.min.js'];
+App.loader.libs.select2 = ['#jquery.select2/select2.css','#jquery.select2/select2.min.js'];
+App.loader.libs.select2ex = ['#behaviour/page/select2.min.js'];
+App.loader.libs.selectPage = ['#selectpage/selectpage.css','#selectpage/selectpage.min.js'];
+App.loader.libs.jqueryui = ['#jquery.ui/jquery-ui.custom.min.js','#jquery.ui/jquery-ui.touch-punch.min.js'];
+App.loader.libs.dropzone = ['#jquery.ui/css/dropzone.min.css','#dropzone/dropzone.min.js'];
+App.loader.libs.loadingOverlay = ['#loadingoverlay/loadingoverlay.min.js'];
 window.UEDITOR_HOME_URL = ASSETS_URL + '/js/editor/ueditor/';
 
 App.editor = {
-	browsingFileURL: App.loader.siteURL + (typeof (window.IS_BACKEND) !== 'undefined' && window.IS_BACKEND ? '' : '/user') + '/finder'
+	browsingFileURL: App.loader.siteURL + (typeof (window.IS_BACKEND) !== 'undefined' && window.IS_BACKEND ? '' : '/user/file') + '/finder'
 };
-
-/* 解析markdown为html */
-App.editor.markdownToHTML = function (viewZoneId, markdownData, options) {
-	if (typeof (viewZoneId) == 'object') {
-		viewZoneId = viewZoneId.attr('id');
-	} else if (viewZoneId.substr(0, 1) == '#') {
-		viewZoneId = viewZoneId.substr(1);
-	}
-	App.loader.defined(typeof (marked), 'editormdPreview');
-	var defaults = {
-		markdown: markdownData,
-		//htmlDecode: true,  // 开启HTML标签解析，为了安全性，默认不开启
-		//htmlDecode: "style,script,iframe",  // you can filter tags decode
-		toc: true,
-		tocm: true,  // Using [TOCM]
-		//gfm           : false,
-		//tocDropdown   : true,
-		emoji: true,
-		taskList: true,
-		tex: true,  // 默认不解析
-		flowChart: true,  // 默认不解析
-		sequenceDiagram: true  // 默认不解析
-	};
-	var params = $.extend({}, defaults, options || {});
-	if (params.flowChart) App.loader.defined(typeof ($.fn.flowChart), 'flowChart');
-	if (params.sequenceDiagram) App.loader.defined(typeof ($.fn.sequenceDiagram), 'sequenceDiagram');
-
-	if (typeof (markdownData) == 'boolean') {
-		var isContainer = markdownData, box = $('#' + viewZoneId);
-		if (isContainer != false) box = $('#' + viewZoneId).find('.markdown-code');
-		box.each(function () {
-			params.markdown = $(this).html();
-			$(this).empty();
-			var idv = $(this).attr('id');
-			if (!idv) {
-				idv = 'markdown-data-' + Math.random();
-				$(this).attr('id', idv);
-			}
-			editormd.markdownToHTML(idv, params);
-		});
-		return;
-	}
-
-	var viewer = editormd.markdownToHTML(viewZoneId, params);
-	return viewer;
+App.editor.loadingOverlay = function (options) {
+	App.loader.defined(typeof ($.fn.LoadingOverlay), 'loadingOverlay');
+	return $.LoadingOverlay(options||{});
 };
-
+App.editor.dialog = function (options) {
+	App.loader.defined(typeof (BootstrapDialog), 'dialog');
+	return BootstrapDialog.show(options||{});
+};
 // =================================================================
 // ueditor
 // =================================================================
@@ -92,7 +74,7 @@ App.editor.ueditor = function (editorElement, uploadUrl, options) {
 	}
 	var idv = $(editorElement).attr('id');
 	if (!idv) {
-		idv = 'ueditor-instance-' + Math.random();
+		idv = 'ueditor-instance-' + App.utils.unixtime();
 		$(editorElement).attr('id', idv);
 	}
 	var editor = UE.getEditor(idv, options);
@@ -103,6 +85,66 @@ App.editor.ueditor = function (editorElement, uploadUrl, options) {
 // =================================================================
 // editormd
 // =================================================================
+App.editor.markdownReset = function() {
+	var path = ASSETS_URL + '/js/editor/markdown/';
+	editormd.emoji.path = path+'images/emojis/';
+	editormd.katexURL.css = path+'lib/katex/katex.min';
+	editormd.katexURL.js = path+'lib/katex/katex.min';
+};
+/* 解析markdown为html */
+App.editor.markdownToHTML = function (viewZoneId, markdownData, options) {
+	if (typeof (viewZoneId) == 'object') {
+		viewZoneId = viewZoneId.attr('id');
+	} else if (viewZoneId.substr(0, 1) == '#') {
+		viewZoneId = viewZoneId.substr(1);
+	}
+	var init = function(options){
+		var defaults = {
+			markdown: markdownData,
+			//markdownSourceCode: true, // 是否保留 Markdown 源码，即是否删除保存源码的 Textarea 标签
+			htmlDecode: "style,script,iframe|on*", // 启用html解码。这里设置需要被过滤的标签和属性。竖线“|”左边的为标签，右边的为属性(1. “*” 代表删除全部属性；2. “on*” 代表删除全部以“on”开头的属性。这两种特殊设置必须放在“|”右边第一的位置)
+			toc: true,
+			tocm: true,  // Using [TOCM]
+			//gfm: true,
+			//tocDropdown: true,
+			emoji: true,
+			taskList: true,
+			tex: true,  // 默认不解析
+			flowChart: true,  // 默认不解析
+			sequenceDiagram: true  // 默认不解析
+		};
+		var params = $.extend({}, defaults, options || {});
+		App.loader.defined(typeof (marked), 'editormdPreview', null, function(){
+			App.editor.markdownReset();
+		});
+		if (params.flowChart) App.loader.defined(typeof ($.fn.flowChart), 'flowChart');
+		if (params.sequenceDiagram) App.loader.defined(typeof ($.fn.sequenceDiagram), 'sequenceDiagram');
+		return params;
+	};
+	var loadingId = 'markdown-render-processing-'+ App.utils.unixtime();
+	var loadingHTML = '<div id="'+loadingId+'"><i class="fa fa-spinner fa-spin fa-3x"></i></div>';
+	if (markdownData == null || typeof (markdownData) == 'boolean') {
+		var isContainer = markdownData, box = $('#' + viewZoneId);
+		if (isContainer != false) box = $('#' + viewZoneId).find('.markdown-code');
+		box.first().before(loadingHTML);
+		var params = init(options);
+		box.each(function () {
+			if($(this).children('textarea').length>0){
+				params.markdown = $(this).children('textarea').text();
+			}else{
+				params.markdown = $(this).text();
+			}
+			editormd.markdownToHTML(this, params);
+		});
+		$('#'+loadingId).remove();
+		return;
+	}
+	$('#'+viewZoneId).before(loadingHTML);
+	var params = init(options);
+	var viewer = editormd.markdownToHTML(viewZoneId, params);
+	$('#'+loadingId).remove();
+	return viewer;
+};
 
 App.editor.markdowns = function (editorElement, uploadUrl, options) {
 	$(editorElement).each(function () {
@@ -113,7 +155,9 @@ App.editor.markdowns = function (editorElement, uploadUrl, options) {
 App.editor.markdown = function (editorElement, uploadUrl, options) {
 	var isManager = false;
 	if (!uploadUrl) uploadUrl = $(editorElement).attr('action');
-	App.loader.defined(typeof (editormd), 'editormd');
+	App.loader.defined(typeof (editormd), 'editormd', null, function(){
+		App.editor.markdownReset();
+	});
 	if (uploadUrl) {
 		if (uploadUrl.substr(0, 1) == '!') {
 			uploadUrl = uploadUrl.substr(1);
@@ -127,10 +171,18 @@ App.editor.markdown = function (editorElement, uploadUrl, options) {
 		if (!isManager) uploadUrl += 'format=json&';
 		uploadUrl += 'filetype=image&client=markdown';
 	}
+	var browseFn = function(ed) {
+		App.editor.finderDialog(App.editor.browsingFileURL + '?from=parent&size=12&filetype=image&multiple=0', function(fileList){
+			if (fileList.length <= 0) {
+				return App.message({ type: 'error', text: App.t('没有选择任何选项！') });
+			}
+			ed.dialog.find("[data-url]").val(fileList[0]);
+		}, 100000);
+	};
 	var container = $(editorElement).parent(),
 		containerId = container.attr('id');
 	if (containerId === undefined) {
-		containerId = 'webx-md-' + window.location.href.replace(/[^\w]+/g, '-');
+		containerId = 'webx-md-' + App.utils.unixtime();
 		container.attr('id', containerId);
 	};
 	var path = BACKEND_URL + '/public/assets/backend/js/editor/markdown/';
@@ -138,12 +190,13 @@ App.editor.markdown = function (editorElement, uploadUrl, options) {
 		width: "100%",
 		height: container.height(),
 		path: path + 'lib/',
-		markdown: $(editorElement).text(),
+		markdown: $(editorElement).val(),
 		codeFold: true,
 		saveHTMLToTextarea: true,			// 保存HTML到Textarea
 		searchReplace: true,
 		watch: true,						// 关闭实时预览
-		//htmlDecode: "style,script,iframe",	// 开启HTML标签解析，为了安全性，默认不开启
+		htmlDecode: "style,script,iframe|on*", // 启用html解码。这里设置需要被过滤的标签和属性。竖线“|”左边的为标签，右边的为属性(1. “*” 代表删除全部属性；2. “on*” 代表删除全部以“on”开头的属性。这两种特殊设置必须放在“|”右边第一的位置)
+		//autoHeight : true, // 自动高度
 		emoji: true,
 		taskList: true,
 		tocm: true,					 // Using [TOCM]
@@ -153,8 +206,10 @@ App.editor.markdown = function (editorElement, uploadUrl, options) {
 		imageUpload: true,
 		imageFormats: ["jpg", "jpeg", "gif", "png", "bmp"],
 		imageUploadURL: uploadUrl,
+		imageBrowseFn: browseFn,
 		crossDomainUpload: true,
 		uploadCallbackURL: path + 'plugins/image-dialog/upload_callback.htm',
+		dialogLockScreen: false,
 		onload: function () { }
 	};
 	var params = $.extend({}, defaults, options || {});
@@ -179,21 +234,20 @@ App.editor.markdown = function (editorElement, uploadUrl, options) {
 		};
 		params.toolbarHandlers = {
 			'browsing-image': function (cm, icon, cursor, selection) {
-				App.editor.finderDialog(App.editor.browsingFileURL + '?size=12&filetype=image&multiple=1', function(fileList){
+				App.editor.finderDialog(App.editor.browsingFileURL + '?from=parent&size=12&filetype=image&multiple=1', function(fileList,infoList){
 					if (fileList.length <= 0) {
 						return App.message({ type: 'error', text: App.t('没有选择任何选项！') });
 					} 
 					var urls = [];
 					for (var i = 0; i < fileList.length; i++) {
-						var v = fileList[i], r = String(v).split('/');
-						var name = r.length > 0 ? r[r.length-1] : v;
+						var v = fileList[i];
+						var name = infoList[i].name;
 						urls.push('![' + name + '](' + v + ')');
 					}
 					//var linenum=urls.length>0?urls.length-1:0;
 					urls = urls.join('\n') + '\n';
 					cm.replaceSelection(urls);
 					//if(selection === "") cm.setCursor(cm.line+linenum, cm.ch+1);
-					dialog.modal('hide');
 				});
 			}
 		};
@@ -374,10 +428,19 @@ App.editor.summernote = function (elem, minHeight, bs4) {
 App.editor.markdownItToHTML = function markdownParse(box, isContainer) {
 	App.loader.defined(typeof (window.markdownit), 'markdownit');
 	App.loader.defined(typeof (window.prettyPrint), 'codehighlight');
+	if (typeof(box) != 'object') {
+		box = $(box);
+	}
 	if (isContainer != false) box = box.find('.markdown-code');
 	var md = App.editor.markdownItInstance();
 	box.each(function () {
-		$(this).html(md.render($.trim($(this).html())));
+		var markdown;
+		if($(this).children('textarea').length>0){
+			markdown = $(this).children('textarea').text();
+		}else{
+			markdown = $(this).text();
+		}
+		$(this).html(md.render($.trim(markdown)));
 		$(this).find("pre > code").each(function () {
 			$(this).parent("pre").addClass("prettyprint linenums");
 		});
@@ -401,28 +464,28 @@ App.editor.tinymces = function (elem, uploadUrl, options, useSimpleToolbar) {
 		App.editor.tinymce(this, uploadUrl, options, useSimpleToolbar);
 	});
 };
-App.editor.finderDialog = function (remoteURL, callback) {
+App.editor.finderDialog = function (remoteURL, callback, zIndex) {
+	if(!zIndex) zIndex = 2000;
 	App.loader.defined(typeof (BootstrapDialog), 'dialog');
 	var dialog = BootstrapDialog.show({
 		title: App.t('选择文件'),
 		//animate: false,
 		message: function (dialog) {
-			var cb = "finderDialogCallback" + (new Date().getTime());
-			window[cb] = function (files) {
-				callback(files);
+			var cb = "finderDialogCallback" + App.utils.unixtime();
+			window[cb] = function (files,infos) {
+				callback(files,infos);
 				if (files && files.length > 0) dialog.close();
 			}
-			return $('<iframe src="' + remoteURL + '&callback=' + cb + '" style="width:620px;height:635px;border:0;padding:0;margin:0"></iframe>');
+			return $('<iframe src="' + remoteURL + '&callback=' + cb + '" style="width:100%;height:635px;border:0;padding:0;margin:0"></iframe>');
 			/*
 			var $message = $('<div></div>');
 			var pageToLoad = dialog.getData('pageToLoad');
 			$message.load(pageToLoad);
-	
 			return $message;
 			*/
 		},
 		onshown: function (d) {
-			d.$modal.css('zIndex', 2000);
+			d.$modal.css('zIndex', zIndex);
 			d.$modalBody.css('padding', 0);
 			//console.dir(d);
 		}
@@ -444,7 +507,7 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 	App.loader.defined(typeof ($.fn.tinymce), 'tinymce');
 	if (!uploadUrl) uploadUrl = $(elem).attr('action');
 	var managerUrl = App.editor.browsingFileURL;
-	if (uploadUrl.substr(0, 1) == '!') {
+	if (uploadUrl && uploadUrl.substr(0, 1) == '!') {
 		managerUrl = uploadUrl.substr(1);
 		uploadUrl = $(elem).data('upload-url');
 	}
@@ -470,25 +533,22 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 	var filePickerCallback = function (callback, value, meta) {
 		switch (meta.filetype) {
 			case 'file': //Provide file and text for the link dialog
-				App.editor.finderDialog(managerUrl + meta.filetype, function (files) {
-					if (files && files.length > 0)
-						callback(files[0], { text: 'My text' });
+				App.editor.finderDialog(managerUrl + meta.filetype, function (files,infos) {
+					if (files && files.length > 0) callback(files[0], { text: infos[0].name });
 				});
 				//callback('https://www.google.com/logos/google.jpg', { text: 'My text' });
 				break;
 
 			case 'image': //Provide image and alt text for the image dialog
-				App.editor.finderDialog(managerUrl + meta.filetype, function (files) {
-					if (files && files.length > 0)
-						callback(files[0], { alt: '' });
+				App.editor.finderDialog(managerUrl + meta.filetype, function (files,infos) {
+					if (files && files.length > 0) callback(files[0], { alt: infos[0].name });
 				});
 				//callback('https://www.google.com/logos/google.jpg', { alt: 'My alt text' });
 				break;
 
 			case 'media': //Provide alternative source and posted for the media dialog
-				App.editor.finderDialog(managerUrl + meta.filetype, function (files) {
-					if (files && files.length > 0)
-						callback(files[0], {});
+				App.editor.finderDialog(managerUrl + meta.filetype, function (files,infos) {
+					if (files && files.length > 0) callback(files[0], {});
 				});
 				//callback('movie.mp4', { source2: 'alt.ogg', poster: 'https://www.google.com/logos/google.jpg' });
 				break;
@@ -503,14 +563,12 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 		xhr.withCredentials = false;
 		xhr.open('POST', uploadUrl);
 		xhr.onload = function () {
-			var json;
-
 			if (xhr.status != 200) {
 				failure('HTTP Error: ' + xhr.status);
 				return;
 			}
 
-			json = JSON.parse(xhr.responseText);
+			var json = JSON.parse(xhr.responseText);
 			//{"Code":1,"Info":"","Data":{"Url":"a.jpg","Id":"1"}}
 			if (!json || typeof json.Code == 'undefined') {
 				failure('Invalid JSON: ' + xhr.responseText);
@@ -528,19 +586,24 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 		formData.append('filedata', blobInfo.blob(), blobInfo.filename());
 		xhr.send(formData);
 	};
+	var contextmenu = 'link table';
+	var selectionToobar = 'bold italic | quicklink h2 h3 blockquote quicktable';
+	var plugin = 'print preview paste importcss searchreplace autolink autosave save directionality code visualblocks visualchars fullscreen image link media template codesample table charmap hr pagebreak nonbreaking anchor toc insertdatetime advlist lists wordcount imagetools textpattern noneditable charmap quickbars emoticons';
+	if (uploadUrl) {
+		contextmenu += ' image imagetools';
+		selectionToobar += ' quickimage';
+	}
 	var defaults = {
 		height: useSimpleToolbar ? 200 : 500,
 		menubar: true,
 		language: App.langTag('_'),
-		plugins: [
-			'print preview paste importcss searchreplace autolink autosave save directionality code visualblocks visualchars fullscreen image link media template codesample table charmap hr pagebreak nonbreaking anchor toc insertdatetime advlist lists wordcount imagetools textpattern noneditable charmap quickbars emoticons'
-		],
+		plugins: [plugin],
 		toolbar: useSimpleToolbar ? simpleToolbar : fullToolbar,
 		toolbar_sticky: true,
-		autosave_ask_before_unload: true,
+		autosave_ask_before_unload: false,
 		autosave_interval: "30s",
 		autosave_prefix: "{path}{query}-{id}-",
-		autosave_restore_when_empty: false,
+		autosave_restore_when_empty: true,
 		autosave_retention: "2m",
 		image_advtab: true,
 		templates: [
@@ -549,10 +612,10 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 		image_caption: true,
 		relative_urls: false,
 		image_title: true,
-		quickbars_selection_toolbar: 'bold italic | quicklink h2 h3 blockquote quickimage quicktable',
+		quickbars_selection_toolbar: selectionToobar,
 		noneditable_noneditable_class: "mceNonEditable",
 		toolbar_drawer: 'sliding',
-		contextmenu: "link image imagetools table",
+		contextmenu: contextmenu,
 		setup: function (editor) {
 			var toTimeHtml = function (date) {
 				return '<time datetime="' + date.toString() + '">' + date.toLocaleString() + '</time>';
@@ -581,15 +644,45 @@ App.editor.tinymce = function (elem, uploadUrl, options, useSimpleToolbar) {
 	};
 	if (managerUrl) defaults.file_picker_callback = filePickerCallback;
 	if (uploadUrl) defaults.images_upload_handler = imagesUploadHandler;
+	var id = App.utils.elemToId(elem).replace(/^#/,'');
 	//see document: https://www.tiny.cloud/docs/integrations/jquery/
 	$(elem).tinymce($.extend({}, defaults, options || {}));
+	$(elem).data('editor-name', 'tinymce');
+	var editor = tinymce.get(id);
+	$(elem).data("editor-object", editor);
 };
 
+App.editor.switcher = function(swicherElem, contentElem, defaultEditorName) {
+	if($(swicherElem).length<1) return;
+	var event, tagName = String($(swicherElem).get(0).tagName).toLowerCase();
+	switch(tagName){
+		case 'select':
+			event = 'change';
+			break;
+		default:
+			event = 'click';
+	}
+	$(swicherElem).on(event, function(){
+		var etype=$(this).val();
+		var texta=$(contentElem);
+		var editorName=$(this).data('editor-name') || defaultEditorName;
+		texta.data("editor-type",etype);
+		return App.editor.switch(editorName, texta);
+	});
+	$(contentElem).data('placeholder', $(contentElem).attr('placeholder'));
+	switch(tagName){
+		case 'input':
+			$(swicherElem).filter(':checked').first().trigger(event);
+			break;
+		default:
+			$(swicherElem).trigger(event);
+	}
+};
 
 //例如：App.editor.switch($('textarea'))
-App.editor.switch = function (texta, cancelFn, tips) {
+App.editor.switch = function (editorName, texta, cancelFn, tips) {
 	var upurl = texta.attr('action') || texta.data("upload-url") || '!' + App.editor.browsingFileURL + '?size=12&multiple=1',
-		etype = texta.data("editor"),
+		etype = texta.data("editor-type"),
 		ename = texta.data("editor-name"),
 		eobject = texta.data("editor-object"),
 		ctype = texta.data("current-editor");
@@ -603,6 +696,60 @@ App.editor.switch = function (texta, cancelFn, tips) {
 	var content = texta.data("content-elem"), cElem = content;
 	if (content) cElem = App.loader.parseTmpl(content, { type: etype });
 	var obj = texta.get(0);
+	var removeHTMLEditor = function(){
+		switch (ename) {
+			case 'xheditor':
+				if (typeof (texta.xheditor) != 'undefined') texta.xheditor(false);
+				break;
+			case 'ueditor':
+				eobject && eobject.destroy();
+				break;
+			case 'tinymce': // doc: https://www.tiny.cloud/docs/api/tinymce/tinymce.editor/#remove
+				eobject && eobject.remove();
+				break;
+			default:
+		}
+	};
+	var createHTMLEditor = function(editorName){
+		var options = texta.data(editorName+"-options") || {};
+		switch (editorName) {
+			case 'ueditor':
+				App.editor.ueditor(obj, upurl, options);
+				break;
+			case 'tinymce':
+				App.editor.tinymce(obj, upurl, options);
+				var t = window.setInterval(function(){
+					if(texta.next('.tox-tinymce').length>0){
+						texta.next('.tox-tinymce').show();
+						window.clearInterval(t);
+					}
+				},100);
+				break;
+			default: // xheditor
+				App.editor.xheditor(obj, upurl, options);
+		}
+	};
+	var createMarkdownEditor = function(){
+		var options = texta.data("markdown-options") || {};
+		App.editor.markdown(obj, upurl, options);
+	};
+	var remoteMarkdownEditor = function(){
+		if (cElem && $(cElem).length > 0) {
+			var cc = App.loader.parseTmpl(content, { type: ctype });
+			if (cc && $(cc).length > 0) {
+				$(cc).text(texta.val());
+				var ht = $('textarea[name="' + texta.parent().attr('id') + '-html-code"]');
+				if (ht.length > 0 && ht.val() != "") {
+					$(cElem).text(ht.val());
+					$(cElem).val(ht.val());
+				}
+			};
+			texta.val($(cElem).val());
+			texta.text($(cElem).val());
+		}
+		texta.parent().removeAttr('class');
+		texta.attr('class', className).siblings().remove();
+	};
 	switch (etype) {
 		case 'markdown':
 			if (tips) {
@@ -614,43 +761,24 @@ App.editor.switch = function (texta, cancelFn, tips) {
 					}
 				}
 			}
-			switch (ename) {
-				case 'xheditor':
-					if (typeof (texta.xheditor) != 'undefined') {
-						texta.xheditor(false);
-					}
-					break;
-				case 'ueditor':
-					eobject.destroy();
-					break;
-			}
 			if (cElem && $(cElem).length > 0) {
 				texta.text($(cElem).val());
 				texta.val($(cElem).val());
 			}
-
-			App.editor.markdown(obj, upurl);
-			texta.data("current-editor", etype);
+			removeHTMLEditor();
+			createMarkdownEditor();
+			texta.data("current-editor-type", etype);
 			break;
-		default:
-			if (cElem && $(cElem).length > 0) {
-				var cc = App.loader.parseTmpl(content, { type: ctype });
-				if (cc && $(cc).length > 0) {
-					$(cc).text(texta.val());
-					var ht = $('textarea[name="' + texta.parent().attr('id') + '-html-code"]');
-					if (ht.length > 0 && ht.val() != "") {
-						$(cElem).text(ht.val());
-						$(cElem).val(ht.val());
-					}
-				};
-				texta.val($(cElem).val());
-				texta.text($(cElem).val());
-			}
-			texta.parent().removeAttr('class');
-			texta.attr('class', className).siblings().remove();
-			App.editor.xheditor(obj, upurl);
-			//App.editor.initUE(obj, upurl);
-			texta.data("current-editor", "html");
+		case 'text':
+			removeHTMLEditor();
+			remoteMarkdownEditor();
+			texta.attr('placeholder', texta.data('placeholder') || '').show().focus();
+			texta.data("current-editor-type", etype);
+			break;
+		default: // html
+			remoteMarkdownEditor();
+			createHTMLEditor(editorName);
+			texta.data("current-editor-type", "html");
 	};
 	return true;
 };
@@ -664,11 +792,71 @@ App.utils.elemToId = function(elem) {
 	}
 	var id = $(elem).attr("id");
 	if (id) return '#'+id;
-	id = 'generated-id-' + Math.random();
+	id = 'generated-id-' + App.utils.unixtime();
 	$(elem).attr("id", id);
 	return '#'+id;
 };
-
+App.utils.unixtime = function() {
+	return new Date().getTime();
+};
+App.editor.selectPages = function(){
+	App.loader.defined(typeof ($.fn.selectPage), 'selectPage');
+	for(var i=0; i<arguments.length; i+=2){
+		App.editor.selectPage(arguments[i], arguments[i+1],true);
+	}
+}
+App.editor.selectPage = function(elem,options,loaded){
+	if($(elem).length<1)return;
+	var listKey='listData',pagingKey='pagination';
+	if(options!=null){
+		if(typeof(options.listKey)!='undefined') listKey = options.listKey;
+		if(typeof(options.pagingKey)!='undefined') pagingKey = options.pagingKey;
+	}
+	var defaults={
+    	showField: 'name',
+    	keyField: 'id',
+    	data: [], // url or data
+    	params: function(){return {};},
+    	eAjaxSuccess: function(d){
+			if(!d) return undefined;
+			var list = typeof(d.Data[listKey])!='undefined'?d.Data[listKey]:d.Data.list;
+			if(list==null) list=[];
+			var paging;
+			if(typeof(d.Data[pagingKey])=='undefined'||d.Data[pagingKey]==null) {
+				paging={limit:0,page:1,rows:0,pages:0};
+			}else{
+				paging=d.Data[pagingKey];
+			}
+        	return {
+          		"list":list,
+          		"pageSize": paging.limit,
+          		"pageNumber": paging.page,
+          		"totalRow": paging.rows,
+          		"totalPage": paging.pages
+        	};
+    	},
+    	eSelect: function (data) {},
+    	eClear: function () {}
+	};
+	if(!loaded)App.loader.defined(typeof ($.fn.selectPage), 'selectPage');
+	$(elem).selectPage($.extend({},defaults,options||{}));
+}
+App.editor.select2 = function(){
+	App.loader.defined(typeof ($.fn.select2), 'select2');
+	App.loader.defined(typeof (App.select2), 'select2ex');
+	return App.select2;
+}
+App.editor.fileUpload = function(elem,options) {
+	App.loader.defined(typeof ($.fn.fileupload), 'fileUpload');
+	if(typeof(options.dataType)=='undefined')options.dataType='json';
+	$(elem).fileupload(options).prop('disabled', !$.support.fileInput).parent().addClass($.support.fileInput ? undefined : 'disabled');
+};
+App.editor.cropImage = function(uploadURL,thumbsnailElem,originalElem,type,width,height) {
+	App.loader.defined(typeof ($.fn.fileupload), 'fileUpload');
+	App.loader.defined(typeof ($.fn.Jcrop), 'jcrop');
+	App.loader.defined(typeof (cropImage), 'cropImage');
+	return cropImage(uploadURL,thumbsnailElem,originalElem,type,width,height);
+};
 App.editor.fileInput = function (elem) {
 	if (!elem) {
 		elem = '';
@@ -751,3 +939,36 @@ App.editor.fileInput = function (elem) {
 		});
 	});
 };
+App.editor.dropzone = function (elem,options,onSuccss,onError,onRemove) {
+	if($(elem).length<1) return null;
+	App.loader.defined(typeof ($.fn.dropzone), 'dropzone', null, function(){
+		Dropzone.autoDiscover = false;
+	});
+	App.loader.defined(typeof ($.ui), 'jqueryui');
+	var d = $(elem).dropzone($.extend({
+		params: {client:'dropzone'},
+	    paramName: "file", maxFilesize: 0.5, // MB
+		addRemoveLinks : true,
+		acceptedFiles:'image/*',
+		dictDefaultMessage :'<div class="dz-custom-message"><span class="text-bold text-md" title="'+App.t('拖动文件到这里开始上传')+'"><i class="fa fa-caret-right text-danger"></i> Drop files</span> to upload \
+		<span class="grey text-xs text-xs-minus">(or click)</span><br /> \
+		<i class="fa fa-cloud-upload text-primary fa-3x"></i></div>',
+		dictResponseError: 'Error while uploading file!',
+		dictRemoveFile: App.t('删除')
+	},options||{}));
+	var dropzone=d[0].dropzone;
+	dropzone.on("success", function(file,resp,evt) {
+		if(resp.error) {
+			if(typeof(resp.error.message)!="undefined") resp.error = resp.error.message;
+			if(onError) onError.call(this,file,resp.error);
+			return App.message({text:resp.error,type:"error"});
+		}
+		if(onSuccss) onSuccss.apply(this,arguments);
+  	}).on('removedfile', function(file){
+		if(onRemove) onRemove.apply(this,arguments);
+	}).on('error', function(file, message, xhr){
+		if(onError) onError.apply(this,arguments);
+	});
+	$(elem).data('dropzone',dropzone);
+	return dropzone;
+}

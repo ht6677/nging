@@ -18,10 +18,7 @@
 
 package navigate
 
-import (
-	"github.com/admpub/events"
-	"github.com/admpub/events/emitter"
-)
+import "github.com/webx-top/echo"
 
 // EmptyList 空菜单列表
 var EmptyList = List{}
@@ -60,26 +57,52 @@ var TopNavigate = &List{
 				Name:          `删除元数据`,
 				Action:        `kv_delete`,
 			},
-			//警报接收人操作
+			//警报收信账号操作
 			{
 				DisplayOnMenu: true,
-				Name:          `警报接收人`,
+				Name:          `警报收信账号`,
 				Action:        `alert_recipient`,
 			},
 			{
 				DisplayOnMenu: false,
-				Name:          `添加警报接收人`,
+				Name:          `添加警报收信账号`,
 				Action:        `alert_recipient_add`,
 			},
 			{
 				DisplayOnMenu: false,
-				Name:          `修改警报接收人`,
+				Name:          `修改警报收信账号`,
 				Action:        `alert_recipient_edit`,
 			},
 			{
 				DisplayOnMenu: false,
-				Name:          `删除警报接收人`,
+				Name:          `删除警报收信账号`,
 				Action:        `alert_recipient_delete`,
+			},
+			//警报专题
+			{
+				DisplayOnMenu: false,
+				Name:          `警报专题`,
+				Action:        `alert_topic`,
+			},
+			{
+				DisplayOnMenu: false,
+				Name:          `关联收信账号`,
+				Action:        `alert_topic_add`,
+			},
+			{
+				DisplayOnMenu: false,
+				Name:          `修改收信账号`,
+				Action:        `alert_topic_edit`,
+			},
+			{
+				DisplayOnMenu: false,
+				Name:          `取消关联收信账号`,
+				Action:        `alert_topic_delete`,
+			},
+			{
+				DisplayOnMenu: false,
+				Name:          `测试发送警报信息`,
+				Action:        `alert_recipient_test`,
 			},
 			//用户管理
 			{
@@ -125,6 +148,16 @@ var TopNavigate = &List{
 				Name:          `删除角色`,
 				Action:        `role_delete`,
 			},
+			{
+				DisplayOnMenu: true,
+				Name:          `登录日志`,
+				Action:        `login_log`,
+			},
+			{
+				DisplayOnMenu: false,
+				Name:          `删除登录日志`,
+				Action:        `login_log_delete`,
+			},
 			//邀请码管理
 			{
 				DisplayOnMenu: true,
@@ -160,7 +193,7 @@ var TopNavigate = &List{
 			{
 				DisplayOnMenu: false,
 				Name:          `上传图片`,
-				Action:        `upload/:type`,
+				Action:        `upload`,
 			},
 			{
 				DisplayOnMenu: true,
@@ -217,11 +250,11 @@ func TopNavURLs() map[string]int {
 var LeftNavigate = defaultNavigate
 
 func init() {
-	emitter.DefaultCondEmitter.On(`beforeRun`, events.Callback(func(_ events.Event) error {
+	echo.On(`beforeRun`, func(_ echo.H) error {
 		ProjectInitURLsIdent()
 		for index, urlPath := range TopNavigate.FullPath(``) {
 			topNavURLs[urlPath] = index
 		}
 		return nil
-	}))
+	})
 }

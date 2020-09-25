@@ -27,6 +27,7 @@ tower-app-*
 *.log.*
 *.pid
 /installed.lock
+/installed2.lock
 /dist/config
 /dist/ftp.pid
 /dist/nging_*
@@ -46,6 +47,7 @@ debug.log
 /config/frp/*
 /data/nging.pem
 /data/nging.pem.pub
+/data/sm2/*
 /data/logs/*.txt
 /application/library/collector/chrome/*.png
 /data/cache/*

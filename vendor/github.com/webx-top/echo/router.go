@@ -2,6 +2,10 @@ package echo
 
 import (
 	"bytes"
+	"fmt"
+	"net/url"
+	"sort"
+	"strings"
 )
 
 var defaultRoute = &Route{}
@@ -86,6 +90,59 @@ func (r *Route) SetName(name string) IRouter {
 
 func (r *Route) IsZero() bool {
 	return r.Handler == nil
+}
+
+func (r *Route) MakeURI(params ...interface{}) (uri string) {
+	length := len(params)
+	if length == 1 {
+		switch val := params[0].(type) {
+		case url.Values:
+			uri = r.Path
+			for _, name := range r.Params {
+				tag := `:` + name
+				v := val.Get(name)
+				uri = strings.Replace(uri, tag+`/`, v+`/`, -1)
+				if strings.HasSuffix(uri, tag) {
+					uri = strings.TrimSuffix(uri, tag) + v
+				}
+				val.Del(name)
+			}
+			q := val.Encode()
+			if len(q) > 0 {
+				uri += `?` + q
+			}
+		case map[string]string:
+			uri = r.Path
+			for _, name := range r.Params {
+				tag := `:` + name
+				v, y := val[name]
+				if y {
+					delete(val, name)
+				}
+				uri = strings.Replace(uri, tag+`/`, v+`/`, -1)
+				if strings.HasSuffix(uri, tag) {
+					uri = strings.TrimSuffix(uri, tag) + v
+				}
+			}
+			sep := `?`
+			keys := make([]string, 0, len(val))
+			for k := range val {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				uri += sep + url.QueryEscape(k) + `=` + url.QueryEscape(val[k])
+				sep = `&`
+			}
+		case []interface{}:
+			uri = fmt.Sprintf(r.Format, val...)
+		default:
+			uri = fmt.Sprintf(r.Format, val)
+		}
+	} else {
+		uri = fmt.Sprintf(r.Format, params...)
+	}
+	return
 }
 
 func (r *Route) apply(e *Echo) *Route {
@@ -199,13 +256,9 @@ func NewRouter(e *Echo) *Router {
 	}
 }
 
-func (r *Router) Handle(h Handler) Handler {
-	return HandlerFunc(func(c Context) error {
-		method := c.Request().Method()
-		path := c.Request().URL().Path()
-		r.Find(method, path, c)
-		return c.Handle(c)
-	})
+func (r *Router) Handle(c Context) Handler {
+	r.Find(c.Request().Method(), c.Request().URL().Path(), c)
+	return c
 }
 
 // Add 添加路由
@@ -247,6 +300,7 @@ func (r *Router) Add(rt *Route, rid int) {
 			r.insert(rt.Method, path[:i], nil, skind, "", nil, -1)
 			pnames = append(pnames, "*")
 			r.insert(rt.Method, path[:i+1], rt.Handler, akind, ppath, pnames, rid)
+			continue
 		}
 
 		if i < l {

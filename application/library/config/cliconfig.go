@@ -31,9 +31,9 @@ import (
 	"github.com/admpub/log"
 	"github.com/admpub/nging/application/cmd/event"
 	"github.com/admpub/nging/application/library/caddy"
+	"github.com/admpub/nging/application/library/config/startup"
 	"github.com/admpub/nging/application/library/cron"
 	"github.com/admpub/nging/application/library/frp"
-	"github.com/admpub/nging/application/library/config/startup"
 	"github.com/spf13/pflag"
 	"github.com/webx-top/com"
 	"github.com/webx-top/echo"
@@ -42,6 +42,8 @@ import (
 func NewCLIConfig() *CLIConfig {
 	return &CLIConfig{cmds: map[string]*exec.Cmd{}}
 }
+
+var DefaultStartup = `webserver,task,daemon,ftpserver,frpserver,frpclient`
 
 type CLIConfig struct {
 	BackendDomain  string //前台绑定域名
@@ -62,9 +64,9 @@ func (c *CLIConfig) InitFlag(flagSet *pflag.FlagSet) {
 	flagSet.StringVarP(&c.Conf, `config`, `c`, filepath.Join(echo.Wd(), `config/config.yaml`), `config`)
 	flagSet.StringVarP(&c.Confx, `subconfig`, `u`, filepath.Join(echo.Wd(), `config/config.frpserver.yaml`), `submodule config`)
 	flagSet.StringVarP(&c.Type, `type`, `t`, `manager`, `operation type`)
-	flagSet.StringVarP(&c.Startup, `startup`, `s`, `webserver,task,daemon,ftpserver,frpserver,frpclient`, `startup`)
-	flagSet.StringVarP(&c.FrontendDomain, `frontenddomain`, `f`, ``, `frontend domain`)
-	flagSet.StringVarP(&c.BackendDomain, `backenddomain`, `b`, ``, `backend domain`)
+	flagSet.StringVarP(&c.Startup, `startup`, `s`, DefaultStartup, `startup`)
+	flagSet.StringVarP(&c.FrontendDomain, `frontend.domain`, `f`, ``, `frontend domain`)
+	flagSet.StringVarP(&c.BackendDomain, `backend.domain`, `b`, ``, `backend domain`)
 }
 
 func (c *CLIConfig) OnlyRunServer() bool {

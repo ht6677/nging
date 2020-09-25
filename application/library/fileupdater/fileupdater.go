@@ -20,10 +20,7 @@
 // 用法：fileupdater.New(fileModel.NewEmbedded(ctx)).Set(`表名称`,`字段名称`,主键ID).Add(`/test/image.jpg`,false)
 package fileupdater
 
-import (
-	"github.com/admpub/log"
-	uploadHelper "github.com/admpub/nging/application/registry/upload/helper"
-)
+var Debug = false
 
 func New(reler Reler) *FileUpdater {
 	return &FileUpdater{
@@ -58,38 +55,16 @@ func (f *FileUpdater) Add(content *string, embedded bool) (err error) {
 		return
 	}
 	err = f.Edit(content, embedded)
-	if err != nil {
-		return
-	}
-	if len(f.tableID) == 0 || f.tableID == `0` {
-		log.Error(`FileUpdater.Add: tableID is empty`)
-		return
-	}
-	fileIDs := f.rel.FileIDs()
-	if len(fileIDs) == 0 {
-		//println(`fileIDs is empty`)
-		return
-	}
-	var replaces map[string]string
-	replaces, err = f.rel.MoveFileToOwner(f.table, fileIDs, f.tableID)
-	if err != nil {
-		return
-	}
-	if embedded {
-		*content = uploadHelper.ReplaceEmbeddedRes(*content, replaces)
-	} else {
-		*content = uploadHelper.ReplaceRelatedRes(*content, replaces, f.seperator)
-	}
 	return
 }
 
 func (f *FileUpdater) Edit(content *string, embedded bool) (err error) {
-	if !embedded {
+	if embedded {
+		err = f.rel.RelationEmbeddedFiles(f.project, f.table, f.field, f.tableID, *content)
+	} else {
 		err = f.rel.RelationFiles(f.project, f.table, f.field, f.tableID, *content, f.seperator)
-		return
 	}
-	err = f.rel.RelationEmbeddedFiles(f.project, f.table, f.field, f.tableID, *content)
-	return
+	return err
 }
 
 func (f *FileUpdater) Delete() (err error) {

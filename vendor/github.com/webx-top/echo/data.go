@@ -19,10 +19,12 @@
 package echo
 
 import (
+	"context"
 	"encoding/gob"
 	"fmt"
-	"net/http"
 	"strconv"
+
+	pkgCode "github.com/webx-top/echo/code"
 )
 
 func init() {
@@ -30,48 +32,8 @@ func init() {
 	gob.Register(H{})
 }
 
-//Status 状态值
-type Status struct {
-	Text string
-	Code int
-}
-
-var (
-	//States 状态码对应的文本
-	States = map[State]*Status{
-		-2: {`Non-Privileged`, http.StatusOK},  //无权限
-		-1: {`Unauthenticated`, http.StatusOK}, //未登录
-		0:  {`Failure`, http.StatusOK},         //操作失败
-		1:  {`Success`, http.StatusOK},         //操作成功
-	}
-	//GetStatus 获取状态值
-	GetStatus = func(key State) (*Status, bool) {
-		v, y := States[key]
-		return v, y
-	}
-)
-
-//State 状态码类型
-type State int
-
-func (s State) String() string {
-	if v, y := GetStatus(s); y {
-		return v.Text
-	}
-	return `Undefined`
-}
-
-//Int 返回int类型的自定义状态码
-func (s State) Int() int {
-	return int(s)
-}
-
-//HTTPCode 返回HTTP状态码
-func (s State) HTTPCode() int {
-	if v, y := GetStatus(s); y {
-		return v.Code
-	}
-	return http.StatusOK
+func AsError(code pkgCode.Code) *Error {
+	return NewError(pkgCode.CodeDict.Get(code).Text, code)
 }
 
 //Data 响应数据
@@ -90,8 +52,8 @@ type Data interface {
 	SetInfo(info interface{}, args ...int) Data
 	SetZone(zone interface{}) Data
 	SetData(data interface{}, args ...int) Data
-	Gets() (code State, info interface{}, zone interface{}, data interface{})
-	GetCode() State
+	Gets() (code pkgCode.Code, info interface{}, zone interface{}, data interface{})
+	GetCode() pkgCode.Code
 	GetInfo() interface{}
 	GetZone() interface{}
 	GetData() interface{}
@@ -100,7 +62,7 @@ type Data interface {
 
 type RawData struct {
 	context Context
-	Code    State
+	Code    pkgCode.Code
 	State   string `json:",omitempty" xml:",omitempty"`
 	Info    interface{}
 	URL     string      `json:",omitempty" xml:",omitempty"`
@@ -113,7 +75,7 @@ func (d *RawData) Error() string {
 }
 
 func (d *RawData) Reset() Data {
-	d.Code = State(0)
+	d.Code = pkgCode.Code(0)
 	d.State = ``
 	d.Info = nil
 	d.URL = ``
@@ -122,16 +84,31 @@ func (d *RawData) Reset() Data {
 	return d
 }
 
+func (d *RawData) copyFrom(v *RawData) Data {
+	d.SetCode(v.Code.Int())
+	d.Info = v.Info
+	if len(v.URL) > 0 {
+		d.URL = v.URL
+	}
+	if v.Zone != nil {
+		d.Zone = v.Zone
+	}
+	if v.Data != nil {
+		d.Data = v.Data
+	}
+	return d
+}
+
 func (d *RawData) String() string {
 	return fmt.Sprintf(`%v`, d.Info)
 }
 
 //Gets 获取全部数据
-func (d *RawData) Gets() (State, interface{}, interface{}, interface{}) {
+func (d *RawData) Gets() (pkgCode.Code, interface{}, interface{}, interface{}) {
 	return d.Code, d.Info, d.Zone, d.Data
 }
 
-func (d *RawData) GetCode() State {
+func (d *RawData) GetCode() pkgCode.Code {
 	return d.Code
 }
 
@@ -154,22 +131,29 @@ func (d *RawData) GetData() interface{} {
 
 //SetError 设置错误
 func (d *RawData) SetError(err error, args ...int) Data {
-	if err != nil {
-		if len(args) > 0 {
-			d.SetCode(args[0])
-		} else {
-			d.SetCode(0)
+	if err == nil {
+		return d.SetCode(pkgCode.Success.Int())
+	}
+	switch v := err.(type) {
+	case *Error:
+		d.SetInfo(v.Message, v.Code.Int()).SetByMap(v.Extra).SetZone(v.Zone)
+	case *RawData:
+		if v != d {
+			d.copyFrom(v)
 		}
+	default:
+		d.SetCode(pkgCode.Failure.Int())
 		d.Info = err.Error()
-	} else {
-		d.SetCode(1)
+	}
+	if len(args) > 0 {
+		d.SetCode(args[0])
 	}
 	return d
 }
 
 //SetCode 设置状态码
 func (d *RawData) SetCode(code int) Data {
-	d.Code = State(code)
+	d.Code = pkgCode.Code(code)
 	d.State = d.Code.String()
 	return d
 }
@@ -194,6 +178,9 @@ func (d *RawData) SetInfo(info interface{}, args ...int) Data {
 
 //SetByMap 批量设置属性
 func (d *RawData) SetByMap(s Store) Data {
+	if len(s) == 0 {
+		return d
+	}
 	if v, y := s["Data"]; y {
 		d.Data = v
 	}
@@ -206,20 +193,20 @@ func (d *RawData) SetByMap(s Store) Data {
 	if v, y := s["URL"]; y {
 		d.URL, _ = v.(string)
 	}
-	var code State
+	var code pkgCode.Code
 	if v, y := s["Code"]; y {
 		switch c := v.(type) {
-		case State:
+		case pkgCode.Code:
 			code = c
 		case int:
-			code = State(c)
+			code = pkgCode.Code(c)
 		case string:
 			i, _ := strconv.Atoi(c)
-			code = State(i)
+			code = pkgCode.Code(i)
 		default:
 			s := fmt.Sprint(c)
 			i, _ := strconv.Atoi(s)
-			code = State(i)
+			code = pkgCode.Code(i)
 		}
 	}
 	d.Code = code
@@ -282,7 +269,7 @@ func (d *RawData) SetTmplFuncs() {
 	} else {
 		flash = d
 	}
-	d.context.SetFunc(`Code`, func() State {
+	d.context.SetFunc(`Code`, func() pkgCode.Code {
 		return flash.Code
 	})
 	d.context.SetFunc(`Info`, func() interface{} {
@@ -327,12 +314,16 @@ func (d *RawData) Set(code int, args ...interface{}) Data {
 }
 
 func NewData(ctx Context) *RawData {
-	c := State(1)
+	c := pkgCode.Success
 	return &RawData{
 		context: ctx,
 		Code:    c,
 		State:   c.String(),
 	}
+}
+
+func NewKV(k, v string) *KV {
+	return &KV{K: k, V: v}
 }
 
 //KV 键值对
@@ -341,15 +332,49 @@ type KV struct {
 	V  string
 	H  H           `json:",omitempty" xml:",omitempty"`
 	X  interface{} `json:",omitempty" xml:",omitempty"`
-	fn func() interface{}
+	fn func(context.Context) interface{}
 }
 
-func (a *KV) SetFn(fn func() interface{}) *KV {
+func (a *KV) SetK(k string) *KV {
+	a.K = k
+	return a
+}
+
+func (a *KV) SetV(v string) *KV {
+	a.V = v
+	return a
+}
+
+func (a *KV) SetKV(k, v string) *KV {
+	a.K = k
+	a.V = v
+	return a
+}
+
+func (a *KV) SetH(h H) *KV {
+	a.H = h
+	return a
+}
+
+func (a *KV) SetHKV(k string, v interface{}) *KV {
+	if a.H == nil {
+		a.H = H{}
+	}
+	a.H.Set(k, v)
+	return a
+}
+
+func (a *KV) SetX(x interface{}) *KV {
+	a.X = x
+	return a
+}
+
+func (a *KV) SetFn(fn func(context.Context) interface{}) *KV {
 	a.fn = fn
 	return a
 }
 
-func (a *KV) Fn() func() interface{} {
+func (a *KV) Fn() func(context.Context) interface{} {
 	return a.fn
 }
 
@@ -435,7 +460,7 @@ func (a *KVData) AddItem(item *KV) *KVData {
 //Set 设置首个键值
 func (a *KVData) Set(k, v string) *KVData {
 	a.index[k] = []int{0}
-	a.slice = []*KV{&KV{K: k, V: v}}
+	a.slice = []*KV{{K: k, V: v}}
 	return a
 }
 
@@ -445,20 +470,26 @@ func (a *KVData) SetItem(item *KV) *KVData {
 	return a
 }
 
-func (a *KVData) Get(k string) string {
+func (a *KVData) Get(k string, defaults ...string) string {
 	if indexes, ok := a.index[k]; ok {
 		if len(indexes) > 0 {
 			return a.slice[indexes[0]].V
 		}
 	}
+	if len(defaults) > 0 {
+		return defaults[0]
+	}
 	return ``
 }
 
-func (a *KVData) GetItem(k string) *KV {
+func (a *KVData) GetItem(k string, defaults ...func() *KV) *KV {
 	if indexes, ok := a.index[k]; ok {
 		if len(indexes) > 0 {
 			return a.slice[indexes[0]]
 		}
+	}
+	if len(defaults) > 0 {
+		return defaults[0]()
 	}
 	return nil
 }

@@ -24,7 +24,9 @@ import (
 
 	"github.com/admpub/nging/application/cmd/event"
 	"github.com/admpub/nging/application/handler"
+	"github.com/admpub/nging/application/registry/alert"
 	"github.com/admpub/nging/application/model"
+	modelAlert "github.com/admpub/nging/application/model/alert"
 )
 
 func AlertRecipient(ctx echo.Context) error {
@@ -34,21 +36,26 @@ func AlertRecipient(ctx echo.Context) error {
 	if len(q) > 0 {
 		cond.AddKV(`name`, q)
 	}
+	excludeTopic := ctx.Formx(`excludeTopic`).String()
+	if len(excludeTopic) > 0 {
+		topicM := model.NewAlertTopic(ctx)
+		cond.Add(db.Raw("NOT EXISTS (SELECT 1 FROM `"+topicM.Name_()+"` WHERE `topic`=? AND `recipient_id`=`"+m.Name_()+"`.`id`)", excludeTopic))
+	}
 	_, err := handler.PagingWithLister(ctx, handler.NewLister(m, nil, func(r db.Result) db.Result {
 		return r.OrderBy(`-id`)
 	}, cond.And()))
 	ctx.Set(`listData`, m.Objects())
-	ctx.Set(`title`, ctx.E(`警报接收人`))
-	ctx.SetFunc(`platformName`, model.AlertRecipientPlatforms.Get)
-	ctx.Set(`topicList`, model.AlertTopics.Slice())
-	ctx.SetFunc(`topicName`, model.AlertTopics.Get)
+	ctx.Set(`title`, ctx.T(`警报收信账号`))
+	ctx.SetFunc(`platformName`, alert.RecipientPlatforms.Get)
+	ctx.Set(`topicList`, alert.Topics.Slice())
+	ctx.SetFunc(`topicName`, alert.Topics.Get)
 	return ctx.Render(`/manager/alert_recipient`, handler.Err(ctx, err))
 }
 
 func AlertRecipientAdd(ctx echo.Context) error {
 	var err error
+	m := model.NewAlertRecipient(ctx)
 	if ctx.IsPost() {
-		m := model.NewAlertRecipient(ctx)
 		err = ctx.MustBind(m.NgingAlertRecipient)
 		if err == nil {
 			_, err = m.Add()
@@ -57,10 +64,19 @@ func AlertRecipientAdd(ctx echo.Context) error {
 			handler.SendOk(ctx, ctx.T(`操作成功`))
 			return ctx.Redirect(handler.URLFor(`/manager/alert_recipient`))
 		}
+	} else {
+		id := ctx.Formx(`copyId`).Uint()
+		if id > 0 {
+			err = m.Get(nil, db.Cond{`id`: id})
+			if err == nil {
+				echo.StructToForm(ctx, m.NgingAlertRecipient, ``, echo.LowerCaseFirstLetter)
+				ctx.Request().Form().Set(`id`, `0`)
+			}
+		}
 	}
 	ctx.Set(`activeURL`, `/manager/alert_recipient`)
-	ctx.Set(`title`, ctx.E(`添加警报接收人`))
-	ctx.Set(`platforms`, model.AlertRecipientPlatforms.Slice())
+	ctx.Set(`title`, ctx.T(`添加收信账号`))
+	ctx.Set(`platforms`, alert.RecipientPlatforms.Slice())
 	return ctx.Render(`/manager/alert_recipient_edit`, handler.Err(ctx, err))
 }
 
@@ -100,8 +116,8 @@ func AlertRecipientEdit(ctx echo.Context) error {
 	}
 
 	ctx.Set(`activeURL`, `/manager/alert_recipient`)
-	ctx.Set(`title`, ctx.E(`修改警报接收人`))
-	ctx.Set(`platforms`, model.AlertRecipientPlatforms.Slice())
+	ctx.Set(`title`, ctx.T(`修改收信账号`))
+	ctx.Set(`platforms`, alert.RecipientPlatforms.Slice())
 	return ctx.Render(`/manager/alert_recipient_edit`, handler.Err(ctx, err))
 }
 
@@ -113,7 +129,13 @@ func AlertRecipientTest(ctx echo.Context) error {
 		return err
 	}
 	user := handler.User(ctx)
-	err = row.Send(ctx.T(`测试信息(%s)`, event.SoftwareName), ctx.T("您好，我是%s管理员`%s`，这是我发的测试信息，请忽略😊", event.SoftwareName, user.Username))
+	params := echo.H{
+		`title`: ctx.T(`测试信息(%s)`, event.SoftwareName),
+		`email-content`: []byte(ctx.T("您好，我是%s管理员`%s`，这是我发的测试信息，请忽略😊", event.SoftwareName, user.Username)),
+	}
+	params[`markdown-content`] = params[`email-content`]
+	params[`content`] = modelAlert.DefaultTextContent
+	err = row.Send(params)
 	if err != nil {
 		return err
 	}

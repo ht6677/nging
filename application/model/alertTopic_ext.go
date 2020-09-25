@@ -2,11 +2,10 @@ package model
 
 import (
 	"encoding/json"
-	"strings"
 
 	"github.com/admpub/nging/application/dbschema"
-	"github.com/admpub/nging/application/library/cron"
-	"github.com/admpub/nging/application/library/imbot"
+	"github.com/admpub/nging/application/model/alert"
+	alertRegistry "github.com/admpub/nging/application/registry/alert"
 	"github.com/webx-top/com"
 	"github.com/webx-top/echo"
 	"github.com/webx-top/echo/param"
@@ -18,13 +17,15 @@ type AlertTopicExt struct {
 	Extra echo.H
 }
 
-func AlertSend(ctx echo.Context, topic string, message string, extra ...string) error {
-	m := NewAlertTopic(ctx)
-	var title string
-	if len(extra) > 0 {
-		title = extra[0]
+func init() {
+	alertRegistry.SendTopic = func(ctx echo.Context, topic string, params param.Store) error {
+		return AlertSend(ctx, topic, params)
 	}
-	return m.Send(topic, title, message)
+}
+
+func AlertSend(ctx echo.Context, topic string, params param.Store) error {
+	m := NewAlertTopic(ctx)
+	return m.Send(topic, params)
 }
 
 func (a *AlertTopicExt) Parse() *AlertTopicExt {
@@ -41,48 +42,14 @@ func (a *AlertTopicExt) Parse() *AlertTopicExt {
 	return a
 }
 
-func (a *AlertTopicExt) Send(title string, message string) (err error) {
+func (a *AlertTopicExt) Send(params param.Store) (err error) {
 	if a.Recipient == nil || a.Recipient.Disabled == `Y` {
 		return
 	}
 	a.Parse()
-	return alertSend(a.Recipient, a.Extra, title, message)
+	return alertSend(a.Recipient, a.Extra, params)
 }
 
-func alertSend(a *dbschema.NgingAlertRecipient, extra echo.H, title string, message string) (err error) {
-	switch a.Type {
-	case `email`:
-		err = cron.SendMail(a.Account, strings.SplitN(a.Account, `@`, 2)[0], title, com.Str2bytes(message))
-	case `webhook`:
-		mess := imbot.Open(a.Platform)
-		if mess == nil || mess.Messager == nil {
-			return
-		}
-		var apiURL string
-		if len(a.Account) > 7 {
-			switch a.Account[0:7] {
-			case `https:/`, `http://`:
-				apiURL = a.Account
-			}
-		}
-		if len(apiURL) == 0 {
-			apiURL = mess.Messager.BuildURL(a.Account)
-		}
-		var atMobiles []string
-		if extra.Has(`at`) {
-			switch v := extra.Get(`at`).(type) {
-			case []interface{}:
-				atMobiles = make([]string, len(v))
-				for k, m := range v {
-					atMobiles[k] = param.AsString(m)
-				}
-			case []string:
-				atMobiles = v
-			}
-		}
-		go func(apiURL string, title string, message string, atMobiles ...string) {
-			err = mess.Messager.SendMarkdown(apiURL, title, message, atMobiles...)
-		}(apiURL, title, message, atMobiles...)
-	}
-	return
+func alertSend(a *dbschema.NgingAlertRecipient, extra echo.H, params param.Store) (err error) {
+	return alert.Send(a, extra, params)
 }

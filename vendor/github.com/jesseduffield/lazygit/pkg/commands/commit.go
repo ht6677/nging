@@ -1,26 +1,34 @@
 package commands
 
-import (
-	"github.com/fatih/color"
-)
+import "fmt"
 
 // Commit : A git commit
 type Commit struct {
 	Sha           string
 	Name          string
-	Pushed        bool
-	DisplayString string
+	Status        string // one of "unpushed", "pushed", "merged", "rebasing" or "selected"
+	Action        string // one of "", "pick", "edit", "squash", "reword", "drop", "fixup"
+	Tags          []string
+	ExtraInfo     string // something like 'HEAD -> master, tag: v0.15.2'
+	Author        string
+	UnixTimestamp int64
 }
 
-func (c *Commit) GetDisplayStrings() []string {
-	red := color.New(color.FgRed)
-	yellow := color.New(color.FgYellow)
-	white := color.New(color.FgWhite)
-
-	shaColor := yellow
-	if c.Pushed {
-		shaColor = red
+func (c *Commit) ShortSha() string {
+	if len(c.Sha) < 8 {
+		return c.Sha
 	}
+	return c.Sha[:8]
+}
 
-	return []string{shaColor.Sprint(c.Sha), white.Sprint(c.Name)}
+func (c *Commit) RefName() string {
+	return c.Sha
+}
+
+func (c *Commit) ID() string {
+	return c.RefName()
+}
+
+func (c *Commit) Description() string {
+	return fmt.Sprintf("%s %s", c.Sha[:7], c.Name)
 }

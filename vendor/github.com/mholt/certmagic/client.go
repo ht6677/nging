@@ -15,21 +15,25 @@
 package certmagic
 
 import (
+	"bytes"
+	"crypto/tls"
 	"fmt"
 	"log"
 	weakrand "math/rand"
 	"net"
+	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-acme/lego/certificate"
-	"github.com/go-acme/lego/challenge"
-	"github.com/go-acme/lego/challenge/http01"
-	"github.com/go-acme/lego/challenge/tlsalpn01"
-	"github.com/go-acme/lego/lego"
-	"github.com/go-acme/lego/registration"
+	"github.com/go-acme/lego/v3/acme"
+	"github.com/go-acme/lego/v3/certificate"
+	"github.com/go-acme/lego/v3/challenge"
+	"github.com/go-acme/lego/v3/challenge/http01"
+	"github.com/go-acme/lego/v3/challenge/tlsalpn01"
+	"github.com/go-acme/lego/v3/lego"
+	"github.com/go-acme/lego/v3/registration"
 )
 
 func init() {
@@ -64,10 +68,54 @@ func (cfg *Config) lockKey(op, domainName string) string {
 	return fmt.Sprintf("%s_%s_%s", op, domainName, cfg.CA)
 }
 
+// checkStorage tests the storage by writing random bytes
+// to a random key, and then loading those bytes and
+// comparing the loaded value. If this fails, the provided
+// cfg.Storage mechanism should not be used.
+func (cfg *Config) checkStorage() error {
+	key := fmt.Sprintf("rw_test_%d", weakrand.Int())
+	contents := make([]byte, 1024*10) // size sufficient for one or two ACME resources
+	_, err := weakrand.Read(contents)
+	if err != nil {
+		return err
+	}
+	err = cfg.Storage.Store(key, contents)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		deleteErr := cfg.Storage.Delete(key)
+		if deleteErr != nil {
+			log.Printf("[ERROR] Deleting test key %s from storage: %v", key, err)
+		}
+		// if there was no other error, make sure
+		// to return any error returned from Delete
+		if err == nil {
+			err = deleteErr
+		}
+	}()
+	loaded, err := cfg.Storage.Load(key)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(contents, loaded) {
+		return fmt.Errorf("load yielded different value than was stored; expected %d bytes, got %d bytes of differing elements", len(contents), len(loaded))
+	}
+	return nil
+}
+
 func (cfg *Config) newManager(interactive bool) (Manager, error) {
+	// ensure storage is writeable and readable
+	// TODO: this is not necessary every time; should only
+	// perform check once every so often for each storage,
+	// which may require some global state...
+	err := cfg.checkStorage()
+	if err != nil {
+		return nil, fmt.Errorf("failed storage check: %v - storage is probably misconfigured", err)
+	}
+
 	const maxTries = 3
 	var mgr Manager
-	var err error
 	for i := 0; i < maxTries; i++ {
 		if cfg.NewManager != nil {
 			mgr, err = cfg.NewManager(interactive)
@@ -77,7 +125,14 @@ func (cfg *Config) newManager(interactive bool) (Manager, error) {
 		if err == nil {
 			break
 		}
+		if acmeErr, ok := err.(acme.ProblemDetails); ok {
+			if acmeErr.HTTPStatus == http.StatusTooManyRequests {
+				log.Printf("[ERROR] Too many requests when making new ACME client: %+v - aborting", acmeErr)
+				return nil, err
+			}
+		}
 		log.Printf("[ERROR] Making new certificate manager: %v (attempt %d/%d)", err, i+1, maxTries)
+		time.Sleep(1 * time.Second)
 	}
 	return mgr, err
 }
@@ -126,13 +181,22 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 	client, ok := cfg.acmeClients[clientKey]
 	if !ok {
 		// the client facilitates our communication with the CA server
-		legoCfg := lego.NewConfig(&leUser)
+		legoCfg := lego.NewConfig(leUser)
 		legoCfg.CADirURL = caURL
 		legoCfg.UserAgent = buildUAString()
 		legoCfg.HTTPClient.Timeout = HTTPTimeout
 		legoCfg.Certificate = lego.CertificateConfig{
 			KeyType: keyType,
 			Timeout: certObtainTimeout,
+		}
+		if cfg.TrustedRoots != nil {
+			if ht, ok := legoCfg.HTTPClient.Transport.(*http.Transport); ok {
+				if ht.TLSClientConfig == nil {
+					ht.TLSClientConfig = new(tls.Config)
+					ht.ForceAttemptHTTP2 = true
+				}
+				ht.TLSClientConfig.RootCAs = cfg.TrustedRoots
+			}
 		}
 		client, err = lego.NewClient(legoCfg)
 		if err != nil {
@@ -158,7 +222,7 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 
 		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: cfg.Agreed})
 		if err != nil {
-			return nil, fmt.Errorf("registration error: %v", err)
+			return nil, err
 		}
 		leUser.Registration = reg
 
@@ -190,7 +254,11 @@ func (cfg *Config) newACMEClient(interactive bool) (*acmeClient, error) {
 //
 // Callers who have access to a Config value should use the ObtainCert
 // method on that instead of this lower-level method.
+//
+// This method is throttled according to RateLimitOrders.
 func (c *acmeClient) Obtain(name string) error {
+	c.throttle("Obtain", name)
+
 	// ensure idempotency of the obtain operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
 	err := obtainLock(c.config.Storage, lockKey)
@@ -226,8 +294,8 @@ challengeLoop:
 			if err == nil {
 				break challengeLoop
 			}
-			log.Printf("[ERROR][%s] %v (attempt %d/%d; challenge=%s)",
-				name, err, attempts+1, maxAttempts, chosenChallenge)
+			log.Printf("[ERROR][%s] %s (attempt %d/%d; challenge=%s)",
+				name, strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
 			time.Sleep(1 * time.Second)
 		}
 	}
@@ -280,7 +348,11 @@ func (c *acmeClient) tryObtain(name string) error {
 //
 // Callers who have access to a Config value should use the RenewCert
 // method on that instead of this lower-level method.
+//
+// This method is throttled according to RateLimitOrders.
 func (c *acmeClient) Renew(name string) error {
+	c.throttle("Renew", name)
+
 	// ensure idempotency of the renew operation for this name
 	lockKey := c.config.lockKey("cert_acme", name)
 	err := obtainLock(c.config.Storage, lockKey)
@@ -322,8 +394,8 @@ challengeLoop:
 			if err == nil {
 				break challengeLoop
 			}
-			log.Printf("[ERROR][%s] %v (attempt %d/%d; challenge=%s)",
-				name, err, attempts+1, maxAttempts, chosenChallenge)
+			log.Printf("[ERROR][%s] %s (attempt %d/%d; challenge=%s)",
+				name, strings.TrimSpace(err.Error()), attempts+1, maxAttempts, chosenChallenge)
 			time.Sleep(1 * time.Second)
 		}
 	}
@@ -515,10 +587,28 @@ func (c *acmeClient) nextChallenge(available []challenge.Type) (challenge.Type, 
 		})
 
 	case challenge.DNS01:
-		c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider)
+		if c.config.DNSChallengeOption != nil {
+			c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider, c.config.DNSChallengeOption)
+		} else {
+			c.acmeClient.Challenge.SetDNS01Provider(c.config.DNSProvider)
+		}
 	}
 
 	return randomChallenge, available
+}
+
+func (c *acmeClient) throttle(op, name string) {
+	rateLimiterKey := c.config.CA + "," + c.config.Email
+	rateLimitersMu.Lock()
+	rl, ok := rateLimiters[rateLimiterKey]
+	if !ok {
+		rl = NewRateLimiter(RateLimitOrders, RateLimitOrdersWindow)
+		rateLimiters[rateLimiterKey] = rl
+	}
+	rateLimitersMu.Unlock()
+	log.Printf("[INFO][%s] %s: Waiting on rate limiter...", name, op)
+	rl.Wait()
+	log.Printf("[INFO][%s] %s: Done waiting", name, op)
 }
 
 func buildUAString() string {
@@ -528,6 +618,22 @@ func buildUAString() string {
 	}
 	return ua
 }
+
+// The following rate limits were chosen with respect
+// to Let's Encrypt's rate limits as of 2019:
+// https://letsencrypt.org/docs/rate-limits/
+var (
+	rateLimiters   = make(map[string]*RingBufferRateLimiter)
+	rateLimitersMu sync.RWMutex
+
+	// RateLimitOrders is how many new ACME orders can
+	// be made per account in RateLimitNewOrdersWindow.
+	RateLimitOrders = 300
+
+	// RateLimitOrdersWindow is the size of the sliding
+	// window that throttles new ACME orders.
+	RateLimitOrdersWindow = 3 * time.Hour
+)
 
 // Some default values passed down to the underlying lego client.
 var (

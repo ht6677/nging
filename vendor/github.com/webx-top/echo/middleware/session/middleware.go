@@ -19,28 +19,66 @@ package session
 
 import (
 	"errors"
+	"time"
 
 	"github.com/admpub/sessions"
 	"github.com/webx-top/echo"
 )
 
+const (
+	CookieMaxAgeKey = `CookieMaxAge`
+)
+
+func ForgotMaxAge(c echo.Context) {
+	if c.Session().Get(CookieMaxAgeKey) != nil {
+		c.Session().Delete(CookieMaxAgeKey)
+	}
+}
+
+func RememberMaxAge(c echo.Context, maxAge int) {
+	if maxAge > 0 {
+		c.CookieOptions().SetMaxAge(maxAge)
+		c.Session().Set(CookieMaxAgeKey, maxAge)
+	} else {
+		ForgotMaxAge(c)
+	}
+}
+
+func RememberExpires(c echo.Context, expires time.Time) {
+	if !expires.IsZero() {
+		c.CookieOptions().Expires = expires
+		c.Session().Set(CookieMaxAgeKey, expires)
+	} else {
+		ForgotMaxAge(c)
+	}
+}
+
 func Sessions(options *echo.SessionOptions, store sessions.Store) echo.MiddlewareFuncd {
 	var newSession func(ctx echo.Context) echo.Sessioner
 	if options == nil {
 		newSession = func(ctx echo.Context) echo.Sessioner {
-			options = ctx.SessionOptions()
-			return NewMySession(store, options.Name, ctx)
+			return NewMySession(store, ctx.SessionOptions().Name, ctx)
 		}
 	} else {
 		newSession = func(ctx echo.Context) echo.Sessioner {
-			ctx.SetSessionOptions(options)
-			return NewMySession(store, options.Name, ctx)
+			sessionOptions := options.Clone()
+			ctx.SetSessionOptions(sessionOptions)
+			return NewMySession(store, sessionOptions.Name, ctx)
 		}
 	}
 	return func(h echo.Handler) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			s := newSession(c)
 			c.SetSessioner(s)
+			s.SetPreSaveHook(func(c echo.Context) error {
+				switch v := s.Get(CookieMaxAgeKey).(type) {
+				case int:
+					c.CookieOptions().SetMaxAge(v)
+				case time.Time:
+					c.CookieOptions().Expires = v
+				}
+				return nil
+			})
 			c.AddPreResponseHook(s.Save)
 			err := h.Handle(c)
 			if e := s.Save(); e != nil {

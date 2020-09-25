@@ -22,7 +22,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,17 +30,25 @@ import (
 
 	"github.com/admpub/archiver"
 	loga "github.com/admpub/log"
-	"github.com/admpub/nging/application/library/cron"
+	writerPkg "github.com/admpub/nging/application/library/cron/writer"
 	"github.com/admpub/nging/application/library/dbmanager/driver"
+	"github.com/admpub/nging/application/library/notice"
 	"github.com/webx-top/com"
 )
 
 // Import 导入SQL文件
-func Import(ctx context.Context, cfg *driver.DbAuth, cacheDir string, files []string, asyncs ...bool) error {
+func Import(ctx context.Context, noticer notice.Noticer, cfg *driver.DbAuth, cacheDir string, files []string, asyncs ...bool) error {
 	if len(files) == 0 {
 		return nil
 	}
-	log.Println(`Starting import:`, files)
+	if noticer == nil {
+		noticer = notice.DefaultNoticer
+	}
+	names := make([]string, len(files))
+	for i, file := range files {
+		names[i] = filepath.Base(file)
+	}
+	noticer(`开始导入: `+strings.Join(names, ", "), 1)
 	var (
 		port, host string
 		async      = true
@@ -93,7 +100,7 @@ func Import(ctx context.Context, cfg *driver.DbAuth, cacheDir string, files []st
 			}
 		case `.zip`:
 			dir := filepath.Join(cacheDir, fmt.Sprintf("upload-"+nowTime+"-%d", index))
-			err := archiver.Zip.Open(sqlFile, dir)
+			err := archiver.Unarchive(sqlFile, dir)
 			if err != nil {
 				loga.Error(err)
 				continue
@@ -122,7 +129,7 @@ func Import(ctx context.Context, cfg *driver.DbAuth, cacheDir string, files []st
 		}
 	}
 	sqlFiles = append(sqlFiles, dataFiles...)
-	rec := cron.NewCmdRec(1000)
+	rec := writerPkg.New(1000)
 	for _, sqlFile := range sqlFiles {
 		if len(sqlFile) == 0 {
 			continue
@@ -142,5 +149,6 @@ func Import(ctx context.Context, cfg *driver.DbAuth, cacheDir string, files []st
 			}
 		}
 	}
+	noticer(`结束导入`, 1)
 	return nil
 }

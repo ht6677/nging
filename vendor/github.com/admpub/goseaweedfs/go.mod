@@ -1,5 +1,8 @@
 module github.com/admpub/goseaweedfs
 
-require github.com/patrickmn/go-cache v2.1.0+incompatible
+go 1.14
 
-go 1.13
+require (
+	github.com/linxGnu/gumble v1.0.0
+	github.com/stretchr/testify v1.4.0
+)

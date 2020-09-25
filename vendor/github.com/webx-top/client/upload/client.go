@@ -19,139 +19,33 @@
 package upload
 
 import (
-	"fmt"
-	"path/filepath"
-	"time"
-
 	"github.com/webx-top/echo"
-	"github.com/webx-top/echo/engine"
 )
 
-type Results []*Result
-type Checker func(r *Result) error
-
-func (r Results) FileURLs() (rs []string) {
-	rs = make([]string, len(r))
-	for k, v := range r {
-		rs[k] = v.FileURL
-	}
-	return rs
-}
-
-func (r *Results) Add(result *Result) {
-	*r = append(*r, result)
-}
-
-type Result struct {
-	FileID            int64
-	FileName          string
-	FileURL           string
-	FileType          FileType
-	FileSize          int64
-	SavePath          string
-	Md5               string
-	Addon             interface{}
-	fileNameGenerator func(string) (string, error)
-}
-
-func (r *Result) SetFileNameGenerator(generator func(string) (string, error)) *Result {
-	r.fileNameGenerator = generator
-	return r
-}
-
-func (r *Result) GenFileName() (string, error) {
-	if r.fileNameGenerator == nil {
-		return filepath.Join(time.Now().Format("2006/0102"), r.FileName), nil
-	}
-	return r.fileNameGenerator(r.FileName)
-}
-
-func (r *Result) FileIdString() string {
-	return fmt.Sprintf(`%d`, r.FileID)
-}
-
-func New(object Client) *BaseClient {
-	return &BaseClient{Object: object}
-}
-
-type BaseClient struct {
-	Data *Result
-	echo.Context
-	Object Client
-	err    error
-}
-
-func (a *BaseClient) Init(ctx echo.Context, res *Result) {
-	a.Context = ctx
-	a.Data = res
-}
-
-func (a *BaseClient) Name() string {
-	return "filedata"
-}
-
-func (a *BaseClient) SetError(err error) Client {
-	a.err = err
-	return a
-}
-
-func (a *BaseClient) GetError() error {
-	return a.err
-}
-
-func (a *BaseClient) Error() string {
-	if a.err != nil {
-		return a.err.Error()
-	}
-	return ``
-}
-
-func (a *BaseClient) Body() (file ReadCloserWithSize, err error) {
-	file, a.Data.FileName, err = Receive(a.Name(), a.Context)
-	if err != nil {
-		return
-	}
-	a.Data.FileSize = file.Size()
-	a.Data.Md5, err = file.Md5()
-	return
-}
-
-func (a *BaseClient) Result() (r string) {
-	status := "1"
-	var info string
-	if a.err != nil {
-		status = "0"
-		info = a.err.Error()
-	}
-	r = `{"Code":` + status + `,"Info":"` + info + `","Data":{"Url":"` + a.Data.FileURL + `","Id":"` + a.Data.FileIdString() + `"}}`
-	return
-}
-
-func (a *BaseClient) Response() error {
-	var result string
-	if a.Object != nil {
-		result = a.Object.Result()
-	} else {
-		result = a.Result()
-	}
-	return a.JSONBlob(engine.Str2bytes(result))
-}
-
+// Client 上次客户端处理接口
 type Client interface {
 	//初始化
 	Init(echo.Context, *Result)
+	SetUploadMaxSize(maxSize int64) Client
+	UploadMaxSize() int64
 	SetError(err error) Client
 	GetError() error
-	Error() string
+	ErrorString() string
 
 	//file表单域name属性值
 	Name() string
 
 	//文件内容
 	Body() (ReadCloserWithSize, error)
+	Upload(...OptionsSetter) Client
+	BatchUpload(...OptionsSetter) Client
+	GetBatchUploadResults() Results
 
-	//返回结果
-	Result() string
+	//构建结果
+	BuildResult() Client
+
+	GetRespData() interface{}
+	SetRespData(data interface{}) Client
 
 	Response() error
 }

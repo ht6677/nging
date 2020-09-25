@@ -27,10 +27,12 @@ import (
 	"github.com/fatih/color"
 	"github.com/webx-top/com"
 	"github.com/webx-top/echo"
+	stdCode "github.com/webx-top/echo/code"
 
 	"github.com/admpub/errors"
 	"github.com/admpub/log"
 	"github.com/admpub/nging/application/handler"
+	"github.com/admpub/nging/application/library/common"
 	"github.com/admpub/nging/application/library/config"
 	"github.com/admpub/nging/application/model"
 	"github.com/admpub/nging/application/registry/settings"
@@ -89,7 +91,7 @@ func Progress(ctx echo.Context) error {
 	return ctx.JSON(data)
 }
 
-func install(ctx echo.Context, sqlFile string, isFile bool, installer func(string) error) (err error) {
+func install(ctx echo.Context, sqlFile string, isFile bool, charset string, installer func(string) error) (err error) {
 	var sqlStr string
 	installFunction := func(line string) (rErr error) {
 		installProgress.Finished += int64(len(line)) + 1
@@ -106,6 +108,7 @@ func install(ctx echo.Context, sqlFile string, isFile bool, installer func(strin
 			defer func() {
 				sqlStr = ``
 			}()
+			sqlStr = common.ReplaceCharset(sqlStr, charset, true)
 			return installer(sqlStr)
 		}
 		return nil
@@ -127,19 +130,13 @@ func Setup(ctx echo.Context) error {
 	var err error
 	lockFile := filepath.Join(echo.Wd(), `installed.lock`)
 	if info, err := os.Stat(lockFile); err == nil && info.IsDir() == false {
-		msg := ctx.T(`已经安装过了。如要重新安装，请先删除%s`, lockFile)
-		if ctx.IsAjax() {
-			return ctx.JSON(ctx.Data().SetInfo(msg, 0))
-		}
-		return ctx.String(msg)
+		err = ctx.NewError(stdCode.RepeatOperation, `已经安装过了。如要重新安装，请先删除%s`, lockFile)
+		return err
 	}
 	sqlFiles, err := config.GetSQLInstallFiles()
 	if err != nil {
-		msg := ctx.T(`找不到文件%s，无法安装`, `config/install.sql`)
-		if ctx.IsAjax() {
-			return ctx.JSON(ctx.Data().SetInfo(msg, 0))
-		}
-		return ctx.String(msg)
+		err = ctx.NewError(stdCode.DataNotFound, `找不到文件%s，无法安装`, `config/install.sql`)
+		return err
 	}
 	insertSQLFiles := config.GetSQLInsertFiles()
 	if len(insertSQLFiles) > 0 {
@@ -160,7 +157,8 @@ func Setup(ctx echo.Context) error {
 			var fileSize int64
 			fileSize, err = com.FileSize(sqlFile)
 			if err != nil {
-				return errors.WithMessage(err, sqlFile)
+				err = errors.WithMessage(err, sqlFile)
+				return ctx.NewError(stdCode.Failure, err.Error())
 			}
 			totalSize += fileSize
 		}
@@ -168,8 +166,9 @@ func Setup(ctx echo.Context) error {
 		installProgress.TotalSize += int64(len(handler.OfficialSQL))
 		err = ctx.MustBind(&config.DefaultConfig.DB)
 		if err != nil {
-			return err
+			return ctx.NewError(stdCode.Failure, err.Error())
 		}
+		charset := `utf8mb4`
 		config.DefaultConfig.DB.Database = strings.Replace(config.DefaultConfig.DB.Database, "'", "", -1)
 		config.DefaultConfig.DB.Database = strings.Replace(config.DefaultConfig.DB.Database, "`", "", -1)
 		if config.DefaultConfig.DB.Type == `sqlite` {
@@ -179,19 +178,25 @@ func Setup(ctx echo.Context) error {
 			if strings.HasSuffix(config.DefaultConfig.DB.Database, `.db`) == false {
 				config.DefaultConfig.DB.Database += `.db`
 			}
+		} else {
+			charset = ctx.Form(`charset`, `utf8mb4`)
+			if !com.InSlice(charset, []string{`utf8mb4`, `utf8`}) {
+				return ctx.NewError(stdCode.InvalidParameter, ctx.T(`字符集参数无效`)).SetZone(`charset`)
+			}
 		}
+		config.DefaultConfig.DB.SetKV(`charset`, charset)
 		//连接数据库
 		err = config.ConnectDB(config.DefaultConfig)
 		if err != nil {
 			err = createDatabase(err)
 			if err != nil {
-				return err
+				return ctx.NewError(stdCode.Failure, err.Error())
 			}
 		}
 		//创建数据库数据
 		installer, ok := config.DBInstallers[config.DefaultConfig.DB.Type]
 		if !ok {
-			err = ctx.E(`不支持安装到%s`, config.DefaultConfig.DB.Type)
+			err = ctx.NewError(stdCode.Unsupported, `不支持安装到%s`, config.DefaultConfig.DB.Type)
 			return err
 		}
 
@@ -199,37 +204,37 @@ func Setup(ctx echo.Context) error {
 		adminPass := ctx.Form(`adminPass`)
 		adminEmail := ctx.Form(`adminEmail`)
 		if len(adminUser) == 0 {
-			err = ctx.E(`管理员用户名不能为空`)
+			err = ctx.NewError(stdCode.InvalidParameter, `管理员用户名不能为空`)
 			return err
 		}
 		if !com.IsUsername(adminUser) {
-			err = ctx.E(`管理员名不能包含特殊字符(只能由字母、数字、下划线和汉字组成)`)
+			err = ctx.NewError(stdCode.InvalidParameter, `管理员名不能包含特殊字符(只能由字母、数字、下划线和汉字组成)`)
 			return err
 		}
 		if len(adminPass) < 8 {
-			err = ctx.E(`管理员密码不能少于8个字符`)
+			err = ctx.NewError(stdCode.InvalidParameter, `管理员密码不能少于8个字符`)
 			return err
 		}
 		if len(adminEmail) == 0 {
-			err = ctx.E(`管理员邮箱不能为空`)
+			err = ctx.NewError(stdCode.InvalidParameter, `管理员邮箱不能为空`)
 			return err
 		}
 		if !ctx.Validate(`adminEmail`, adminEmail, `email`).Ok() {
-			err = ctx.E(`管理员邮箱格式不正确`)
+			err = ctx.NewError(stdCode.InvalidParameter, `管理员邮箱格式不正确`)
 			return err
 		}
 		data := ctx.Data()
 		for _, sqlFile := range sqlFiles {
 			log.Info(color.GreenString(`[installer]`), `Execute SQL file: `, sqlFile)
-			err = install(ctx, sqlFile, true, installer)
+			err = install(ctx, sqlFile, true, charset, installer)
 			if err != nil {
-				return err
+				return ctx.NewError(stdCode.Failure, err.Error())
 			}
 		}
 		if len(handler.OfficialSQL) > 0 {
-			err = install(ctx, handler.OfficialSQL, false, installer)
+			err = install(ctx, handler.OfficialSQL, false, charset, installer)
 			if err != nil {
-				return err
+				return ctx.NewError(stdCode.Failure, err.Error())
 			}
 		}
 
@@ -237,7 +242,7 @@ func Setup(ctx echo.Context) error {
 		log.Info(color.GreenString(`[installer]`), `Reconnect the database`)
 		err = config.ConnectDB(config.DefaultConfig)
 		if err != nil {
-			return err
+			return ctx.NewError(stdCode.Failure, err.Error())
 		}
 
 		// 添加创始人
@@ -245,7 +250,8 @@ func Setup(ctx echo.Context) error {
 		log.Info(color.GreenString(`[installer]`), `Create Administrator`)
 		err = m.Register(adminUser, adminPass, adminEmail, ``)
 		if err != nil {
-			return errors.WithMessage(err, `Create Administrator`)
+			err = errors.WithMessage(err, `Create Administrator`)
+			return ctx.NewError(stdCode.Failure, err.Error())
 		}
 
 		// 生成安全密钥
@@ -256,13 +262,13 @@ func Setup(ctx echo.Context) error {
 		log.Info(color.GreenString(`[installer]`), `Save the configuration file`)
 		err = config.DefaultConfig.SaveToFile()
 		if err != nil {
-			return err
+			return ctx.NewError(stdCode.Failure, err.Error())
 		}
 
 		for _, cb := range onInstalled {
 			log.Info(color.GreenString(`[installer]`), `Execute Hook: `, com.FuncName(cb))
 			if err = cb(ctx); err != nil {
-				return err
+				return ctx.NewError(stdCode.Failure, err.Error())
 			}
 		}
 
@@ -270,7 +276,7 @@ func Setup(ctx echo.Context) error {
 		log.Info(color.GreenString(`[installer]`), `Generated file: `, lockFile)
 		err = config.SetInstalled(lockFile)
 		if err != nil {
-			return err
+			return ctx.NewError(stdCode.Failure, err.Error())
 		}
 
 		time.Sleep(1 * time.Second) // 等1秒

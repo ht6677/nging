@@ -29,19 +29,18 @@ import (
 	"github.com/admpub/nging/application/handler"
 	"github.com/admpub/nging/application/library/dbmanager/driver/mysql/utils"
 	"github.com/admpub/nging/application/library/notice"
+	"github.com/admpub/nging/application/library/respond"
 	"github.com/webx-top/echo"
 )
 
 func responseDropzone(err error, ctx echo.Context) error {
 	if err != nil {
-		user := handler.User(ctx)
-		if user != nil {
+		if user := handler.User(ctx); user != nil {
 			notice.OpenMessage(user.Username, `upload`)
 			notice.Send(user.Username, notice.NewMessageWithValue(`upload`, ctx.T(`文件上传出错`), err.Error()))
 		}
-		return ctx.JSON(echo.H{`error`: err.Error()}, 500)
 	}
-	return ctx.String(`OK`)
+	return respond.Dropzone(ctx, err, nil)
 }
 
 func (m *mySQL) importing() error {
@@ -58,6 +57,19 @@ func (m *mySQL) Import() error {
 		if len(m.dbName) == 0 {
 			m.fail(m.T(`请选择数据库`))
 			return m.returnTo(m.GenURL(`listDb`))
+		}
+		clientID := m.Form(`clientID`)
+		user := handler.User(m.Context)
+		var noticer notice.Noticer
+		if user != nil && len(clientID) > 0 {
+			noticerConfig := &notice.HTTPNoticerConfig{
+				User:     user.Username,
+				Type:     `databaseImport`,
+				ClientID: clientID,
+			}
+			noticer = noticerConfig.Noticer(m)
+		} else {
+			noticer = notice.DefaultNoticer
 		}
 		async := m.Formx(`async`).Bool()
 		var sqlFiles []string
@@ -77,6 +89,7 @@ func (m *mySQL) Import() error {
 		if err != nil {
 			return responseDropzone(err, m.Context)
 		}
+		noticer(m.T(`文件上传成功`), 1)
 		cfg := *m.DbAuth
 		cfg.Db = m.dbName
 
@@ -109,7 +122,10 @@ func (m *mySQL) Import() error {
 				}
 			}
 		}()
-		err = utils.Import(bgExec.Context(), &cfg, TempDir(`import`), sqlFiles, async)
+		err = utils.Import(bgExec.Context(), noticer, &cfg, TempDir(`import`), sqlFiles, async)
+		if err != nil {
+			noticer(m.T(`导入失败`)+`: `+err.Error(), 0)
+		}
 		imports.Cancel(cacheKey)
 		done <- struct{}{}
 

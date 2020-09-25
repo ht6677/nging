@@ -9,6 +9,7 @@ import (
 
 	"github.com/admpub/events"
 
+	pkgCode "github.com/webx-top/echo/code"
 	"github.com/webx-top/echo/engine"
 	"github.com/webx-top/echo/logger"
 	"github.com/webx-top/echo/param"
@@ -20,6 +21,7 @@ type Context interface {
 	context.Context
 	events.Emitter
 	SetEmitter(events.Emitter)
+	Handler() Handler
 
 	//Transaction
 	SetTransaction(t Transaction)
@@ -127,6 +129,8 @@ type Context interface {
 	NoContent(...int) error
 	Redirect(string, ...int) error
 	Error(err error)
+	NewError(code pkgCode.Code, msg string, args ...interface{}) *Error
+	NewErrorWith(err error, code pkgCode.Code, args ...interface{}) *Error
 	SetCode(int)
 	Code() int
 	SetData(Data)
@@ -164,6 +168,7 @@ type Context interface {
 	NewCookie(string, string) *Cookie
 	Cookie() Cookier
 	GetCookie(string) string
+	// SetCookie @param:key,value,maxAge(seconds),path(/),domain,secure,httpOnly,sameSite(lax/strict/default)
 	SetCookie(string, string, ...interface{})
 
 	//----------------

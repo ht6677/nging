@@ -23,12 +23,13 @@ import (
 	"github.com/webx-top/echo/middleware/tplfunc"
 
 	"github.com/admpub/nging/application/handler"
-	"github.com/admpub/nging/application/library/common"
+	"github.com/admpub/nging/application/library/codec"
 	"github.com/admpub/nging/application/library/config"
 	"github.com/admpub/nging/application/library/license"
 	"github.com/admpub/nging/application/middleware"
 	"github.com/admpub/nging/application/model"
 	"github.com/admpub/nging/application/registry/dashboard"
+	stdCode "github.com/webx-top/echo/code"
 )
 
 func Index(ctx echo.Context) error {
@@ -37,8 +38,8 @@ func Index(ctx echo.Context) error {
 		return ctx.Redirect(handler.URLFor(`/login`))
 	}
 	var err error
-	ctx.Set(`cards`, dashboard.CardAll().Build(ctx))
-	blocks := dashboard.BlockAll()
+	ctx.Set(`cards`, dashboard.CardAll(ctx).Build(ctx))
+	blocks := dashboard.BlockAll(ctx)
 	if err = blocks.Ready(ctx); err != nil {
 		return err
 	}
@@ -76,8 +77,6 @@ func Login(ctx echo.Context) error {
 			}
 		}
 	}
-
-	common.SetRandomSecret(ctx, `loginPassword`, `passwordSecrect`)
 	return ctx.Render(`login`, handler.Err(ctx, err))
 }
 
@@ -91,7 +90,16 @@ func Register(ctx echo.Context) error {
 		email := ctx.Form(`email`)
 		passwd := ctx.Form(`password`)
 		repwd := ctx.Form(`confirmationPassword`)
-		common.DecryptedByRandomSecret(ctx, `registerPassword`, &passwd, &repwd)
+		passwd, err = codec.DefaultSM2DecryptHex(passwd)
+		if err != nil {
+			err = ctx.NewError(stdCode.InvalidParameter, ctx.T(`密码解密失败: %v`, err)).SetZone(`password`)
+			goto END
+		}
+		repwd, err = codec.DefaultSM2DecryptHex(repwd)
+		if err != nil {
+			err = ctx.NewError(stdCode.InvalidParameter, ctx.T(`您输入的确认密码解密失败: %v`, err)).SetZone(`confirmationPassword`)
+			goto END
+		}
 		if len(code) == 0 {
 			err = ctx.E(`邀请码不能为空`)
 			goto END
@@ -109,7 +117,6 @@ func Register(ctx echo.Context) error {
 			goto END
 		}
 		c.UseInvitationCode(c.Invitation, m.NgingUser.Id)
-		common.DeleteRandomSecret(ctx, `registerPassword`)
 		m.SetSession()
 		returnTo := ctx.Query(`return_to`)
 		if len(returnTo) == 0 {
@@ -119,7 +126,6 @@ func Register(ctx echo.Context) error {
 	}
 
 END:
-	common.SetRandomSecret(ctx, `registerPassword`, `passwordSecrect`)
 	return ctx.Render(`register`, handler.Err(ctx, err))
 }
 
@@ -129,19 +135,19 @@ func Logout(ctx echo.Context) error {
 }
 
 var (
-	donationAccountTypes = echo.NewKVData()
-	defaultDonationAccountType= `alipay`
+	donationAccountTypes       = echo.NewKVData()
+	defaultDonationAccountType = `alipay`
 )
 
 func init() {
 	donationAccountTypes.AddItem(&echo.KV{
-		K: `alipay`, V: `支付宝付款`, X: echo.H{`qrimg`:`alipay.jpg`},
+		K: `alipay`, V: `支付宝付款`, X: echo.H{`qrimg`: `alipay.jpg`},
 	})
 	donationAccountTypes.AddItem(&echo.KV{
-		K: `wechat`, V: `微信支付`, X: echo.H{`qrimg`:`wechat.png`},
+		K: `wechat`, V: `微信支付`, X: echo.H{`qrimg`: `wechat.png`},
 	})
 	donationAccountTypes.AddItem(&echo.KV{
-		K: `btcoin`, V: `比特币支付`, X: echo.H{`qrimg`:`btcoin.jpeg`},
+		K: `btcoin`, V: `比特币支付`, X: echo.H{`qrimg`: `btcoin.jpeg`},
 	})
 }
 

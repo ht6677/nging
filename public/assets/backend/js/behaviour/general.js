@@ -82,6 +82,7 @@ var App = function () {
 
 	function firstChildrenTable(jqObj) {
 		var table = jqObj.children();
+		if(table.length<1) return null;
 		switch (table[0].tagName.toUpperCase()) {
 			case 'TABLE': return table;
 			default: return firstChildrenTable(table)
@@ -99,6 +100,7 @@ var App = function () {
 			if (oldWidth && oldWidth == bodyWidth) return;
 			$(this).data('width', bodyWidth);
 			var table = firstChildrenTable($(this));
+			if (table == null) return;
 			if (table.outerWidth() > bodyWidth) {
 				$(this).addClass('overflow').css('max-width', bodyWidth);
 			} else {
@@ -162,7 +164,19 @@ var App = function () {
 	var cachedLang = null;
 	return {
 		clientID: {},
-		i18n: { SYS_INFO: 'System Information', UPLOAD_ERR: 'Upload Error', PLEASE_SELECT_FOR_OPERATE: 'Please select the item you want to operate', PLEASE_SELECT_FOR_REMOVE: 'Please select the item you want to delete', CONFIRM_REMOVE: 'Are you sure you want to delete them?', SELECTED_ITEMS: 'You have selected %d items', SUCCESS: 'The operation was successful', FAILURE: 'Operation failed' },
+		i18n: {
+			SYS_INFO: 'System Information', 
+			UPLOAD_ERR: 'Upload Error', 
+			PLEASE_SELECT_FOR_OPERATE: 'Please select the item you want to operate', 
+			PLEASE_SELECT_FOR_REMOVE: 'Please select the item you want to delete', 
+			CONFIRM_REMOVE: 'Are you sure you want to delete them?', 
+			SELECTED_ITEMS: 'You have selected %d items', 
+			SUCCESS: 'The operation was successful', 
+			FAILURE: 'Operation failed', 
+			UPLOADING:'File uploading, please wait...', 
+			UPLOAD_SUCCEED:'Upload successfully', 
+			BUTTON_UPLOAD:'Upload' 
+		},
 		lang: 'en',
 		sprintf: sprintfWrapper.init,
 		t: function (key) {
@@ -281,6 +295,7 @@ var App = function () {
 			$.extend(config, options);
 			App.initLeftNav();
 			App.initTool();
+			App.showRequriedInputStar();
 			/*Small devices toggle*/
 			$(".cl-toggle").click(function (e) {
 				var ul = $(".cl-vnavigation");
@@ -297,7 +312,7 @@ var App = function () {
 				var scroll = $("#cl-wrapper .menu-space");
 				scroll.addClass("nano nscroller");
 
-				function update_height() {
+				function updateHeight() {
 					var button = $("#cl-wrapper .collapse-button");
 					var collapseH = button.outerHeight();
 					var navH = $("#head-nav").height();
@@ -307,11 +322,18 @@ var App = function () {
 				}
 
 				$(window).resize(function () {
-					update_height();
+					updateHeight();
 				});
 
-				update_height();
+				updateHeight();
 				$("#cl-wrapper .nscroller").nanoScroller({ preventPageScrolling: true });
+			}else{
+				$(window).resize(function () {
+					if($(window).width()>767){
+						var navH = $("#head-nav").height();
+						$('#cl-wrapper').css("padding-top", navH);
+					}
+				});
 			}
 
 			returnToTopButton();
@@ -331,7 +353,7 @@ var App = function () {
 
 			/*NanoScroller*/
 			if (config.nanoScroller) {
-				$(".nscroller").nanoScroller();
+				$(".nscroller:not(.has-scrollbar)").nanoScroller();
 			}
 
 			/*Nestable Lists*/
@@ -401,7 +423,7 @@ var App = function () {
 			wizard();
 		},
 		markNavByURL: function (url) {
-			if (url == null) url = window.location.pathname;
+			if (!url) url = window.location.pathname;
 			var leftAnchor=$('#leftnav a[href="' + BACKEND_URL+url + '"]');
 			if (leftAnchor.length<1) leftAnchor=$('#leftnav a[href="' + url + '"]');
 			App.markNav(leftAnchor, 'left');
@@ -463,7 +485,7 @@ var App = function () {
 				text: '',
 				image: '',
 				class_name: 'clean',//primary|info|danger|warning|success|dark
-				sticky: false
+				sticky: false // 是否保持显示(不自动关闭)
 				//,time: 1000,speed: 500,position: 'bottom-right'
 			};
 			if (typeof (options) != "object") options = { text: options };
@@ -488,7 +510,10 @@ var App = function () {
 					if (options.title) options.title = '<i class="fa fa-check"></i> ' + options.title; break;
 			}
 			if (sticky != null) options.sticky = sticky;
-			$.gritter.add(options);
+			var number = $.gritter.add(options);
+			//$.gritter.remove(number);
+			//$.gritter.removeAll({before_close:function(wrap){},after_close:function(){}});
+			return number;
 		},
 		attachAjaxURL: function (elem) {
 			if (elem == null) elem = document;
@@ -530,10 +555,40 @@ var App = function () {
 			var options = $.extend({}, defaults, callbacks || {});
 			$(document).on('click', elem + '[data-pjax]', function (event) {
 				var container = $(this).data('pjax'), keepjs = $(this).data('keepjs');
-				var onclick = $(this).data('onclick');
+				var onclick = $(this).data('onclick'), toggleClass = $(this).data('toggleclass');
 				$.pjax.click(event, $(container), { timeout: timeout, keepjs: keepjs });
 				if (options.onclick) options.onclick(this);
 				if (onclick && typeof (window[onclick]) == 'function') window[onclick](this);
+				if (toggleClass) {
+					var arr = toggleClass.split(':'),parent,target;
+					if (arr.length>1) {
+						parent = arr[0];
+						toggleClass = arr[1];
+					}
+					toggleClass = toggleClass.replace(/^\./g,'');
+					if(parent){
+						var index = parent.indexOf('.'),parentElem;
+						if (index > 0) {
+							parentElem = parent.substring(index+1);
+							parent = parent.substring(0,index);
+						}
+						switch(parent){
+							case 'parent':target=$(this).parent(parentElem);break;
+							case 'parents':target=$(this).parents(parentElem);break;
+							case 'closest':target=$(this).closest(parentElem);break;
+							default:target=$(this).parent(parentElem);break;
+						}
+					}else{
+						target = $(this);
+					}
+					target.addClass(toggleClass).siblings('.'+toggleClass).removeClass(toggleClass);
+				}
+				$('.sp_result_area').remove();
+				$('.tox').remove();
+				$('.select2-hidden-accessible').remove();
+				$('.select2-sizer').remove();
+				$('.select2-drop').remove();
+				$('#select2-drop-mask').remove();
 			}).on('pjax:send', function (evt, xhr, option) {
 				App.loading('show');
 				if (options.onsend) options.onsend(evt, xhr, option);
@@ -602,11 +657,11 @@ var App = function () {
 					App.message({text:message||'Websocket Server is disconnected',type:'error'});
 					return false;
 				}
-				if (typeof(m.content) == 'undefined' || m.content == null) {
-					return false;
-				}
 				if (typeof(App.clientID['notify']) == 'undefined') {
 					App.clientID['notify'] = m.client_id;
+				}
+				if (typeof(m.content) == 'undefined' || !m.content) {
+					return false;
 				}
 				switch (m.mode) {
 					case '-':
@@ -688,7 +743,7 @@ var App = function () {
 						if ('notify' != m.mode) m.mode = 'notify';
 						var c = $('#notice-message-container');
 						if (c.length < 1) {
-							App.message({ title: App.i18n.SYS_INFO, text: '<ul id="notice-message-container" class="no-list-style" style="max-height:500px;overflow-y:auto;overflow-x:hidden"></ul>' });
+							App.message({ title: App.i18n.SYS_INFO, text: '<ul id="notice-message-container" class="no-list-style" style="max-height:500px;overflow-y:auto;overflow-x:hidden"></ul>', sticky: true });
 							c = $('#notice-message-container');
 						}
 						if (messageCount[m.mode] >= messageMax[m.mode]) {
@@ -1394,11 +1449,24 @@ var App = function () {
 				}
 			}, 50);
 		},
-		float: function (elem, mode, attr, position) {
+		float: function (elem, mode, attr, position, options) {
 			if (!mode) mode = 'ajax';
-			if (!attr) attr = 'src';
-			if (!position) position = '5-7';
-			$(elem).powerFloat({ 'targetMode': mode, 'targetAttr': attr, 'position': position });
+			if (!attr) attr = mode=='remind'?'rel':'src';
+			if (!position) position = '5-7';//两个数字分别代表trigger(浮动层)-target(来源对象)，（各个数字的编号从矩形框的左上角开始，沿着顺时针开始旋转来进行编号，然后再从上中部开始沿着顺时针开始编号进行。也就是1、2、3、4分别代表左上角、右上角、右下角、左下角；5、6、7、8分别代表上中、右中、下中、左中）
+			else {
+				switch (position) {
+					case 'bottom':position='5-7';break;
+					case 'right':position='8-6';break;
+					case 'top':position='7-5';break;
+					case 'left':position='6-8';break;
+					case 'left-bottom':position='2-4';break;
+					case 'right-bottom':position='1-3';break;
+					case 'left-top':position='3-1';break;
+					case 'right-top':position='4-2';break;
+				}
+			}
+			var defaults = { 'targetMode': mode, 'targetAttr': attr, 'position': position };
+			$(elem).powerFloat($.extend(defaults,options||{}));
 		},
 		uploadPreviewer: function (elem, options, callback) {
 			if($(elem).parent('.file-preview-shadow').length<1){
@@ -1441,7 +1509,54 @@ var App = function () {
 				  	});
 				});
 			}
+		},
+		showRequriedInputStar:function(){
+			$('form:not([required-redstar])').each(function(){
+				$(this).find('[required]').each(function(){
+					var parent = $(this).parent('.input-group');
+					if(parent.length>0){
+						parent.addClass('required');
+						return;
+					}
+					parent = $(this).parent('div[class*="col-"]');
+					if (parent.length>0 && parent.prev('.control-label').length>0) {
+						parent.prev('.control-label').addClass('required');
+						return;
+					}
+					var row = $(this).closest('.form-group');
+					if (row.length<1) return;
+					var lbl = row.children('.control-label:not(.required)');
+					if (lbl.length<1) return;
+					lbl.addClass('required');
+				});
+				$(this).attr('required-redstar','1');
+			});
+		},
+		pushState:function(data,title,url){
+			if(!window.history || !window.history.pushState)return;
+			window.history.pushState(data,title,url);
+		},
+		replaceState:function(data,title,url){
+			if(!window.history || !window.history.replaceState)return;
+			window.history.replaceState(data,title,url);
+		},
+		formatJSON:function(json){
+			json = $.trim(json);
+			var first = json.substring(0,1);
+			if (first=='['||first=='{'){
+				var obj = JSON.parse(json);
+				json = JSON.stringify(obj, null, "\t");
+				return json;
+			}
+			return '';
+		},
+		formatJSONFromInnerHTML:function($a){
+			if($a.data('jsonformatted'))return;
+			$a.data('jsonformatted',true);
+			var json = App.formatJSON($a.html());
+			if(json!='') $a.html(json);
 		}
+	
 	};
 
 }();

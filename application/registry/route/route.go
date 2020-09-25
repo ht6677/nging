@@ -22,11 +22,13 @@ import (
 	"github.com/webx-top/echo"
 	"github.com/webx-top/echo/defaults"
 
+	"github.com/admpub/nging/application/library/hook"
 	"github.com/admpub/nging/application/library/route"
 )
 
 var (
 	routeRegister = route.NewRegister(defaults.Default)
+	Hook          = hook.New()
 )
 
 func Echo() *echo.Echo {
@@ -54,7 +56,9 @@ func Host(hostName string, middlewares ...interface{}) *route.Host {
 }
 
 func Apply() {
+	echo.PanicIf(Hook.Fire(`apply.before`, nil))
 	routeRegister.Apply()
+	echo.PanicIf(Hook.Fire(`apply.after`, nil))
 }
 
 func RegisterToGroup(groupName string, fn func(echo.RouteRegister), middlewares ...interface{}) {

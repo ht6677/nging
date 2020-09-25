@@ -28,6 +28,8 @@ type AwaitPromiseParams struct {
 
 // AwaitPromise add handler to promise with given promise object id.
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-awaitPromise
+//
 // parameters:
 //   promiseObjectID - Identifier of the promise.
 func AwaitPromise(promiseObjectID RemoteObjectID) *AwaitPromiseParams {
@@ -60,10 +62,10 @@ type AwaitPromiseReturns struct {
 // returns:
 //   result - Promise result. Will contain rejected value if promise was rejected.
 //   exceptionDetails - Exception details if stack strace is available.
-func (p *AwaitPromiseParams) Do(ctxt context.Context, h cdp.Executor) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
+func (p *AwaitPromiseParams) Do(ctx context.Context) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res AwaitPromiseReturns
-	err = h.Execute(ctxt, CommandAwaitPromise, p, &res)
+	err = cdp.Execute(ctx, CommandAwaitPromise, p, &res)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -88,6 +90,8 @@ type CallFunctionOnParams struct {
 
 // CallFunctionOn calls function with given declaration on the given object.
 // Object group of the result is inherited from the target object.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-callFunctionOn
 //
 // parameters:
 //   functionDeclaration - Declaration of the function to call.
@@ -172,10 +176,10 @@ type CallFunctionOnReturns struct {
 // returns:
 //   result - Call result.
 //   exceptionDetails - Exception details.
-func (p *CallFunctionOnParams) Do(ctxt context.Context, h cdp.Executor) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
+func (p *CallFunctionOnParams) Do(ctx context.Context) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res CallFunctionOnReturns
-	err = h.Execute(ctxt, CommandCallFunctionOn, p, &res)
+	err = cdp.Execute(ctx, CommandCallFunctionOn, p, &res)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -192,6 +196,8 @@ type CompileScriptParams struct {
 }
 
 // CompileScript compiles expression.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-compileScript
 //
 // parameters:
 //   expression - Expression to compile.
@@ -224,10 +230,10 @@ type CompileScriptReturns struct {
 // returns:
 //   scriptID - Id of the script.
 //   exceptionDetails - Exception details.
-func (p *CompileScriptParams) Do(ctxt context.Context, h cdp.Executor) (scriptID ScriptID, exceptionDetails *ExceptionDetails, err error) {
+func (p *CompileScriptParams) Do(ctx context.Context) (scriptID ScriptID, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res CompileScriptReturns
-	err = h.Execute(ctxt, CommandCompileScript, p, &res)
+	err = cdp.Execute(ctx, CommandCompileScript, p, &res)
 	if err != nil {
 		return "", nil, err
 	}
@@ -239,13 +245,15 @@ func (p *CompileScriptParams) Do(ctxt context.Context, h cdp.Executor) (scriptID
 type DisableParams struct{}
 
 // Disable disables reporting of execution contexts creation.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-disable
 func Disable() *DisableParams {
 	return &DisableParams{}
 }
 
 // Do executes Runtime.disable against the provided context.
-func (p *DisableParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandDisable, nil, nil)
+func (p *DisableParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandDisable, nil, nil)
 }
 
 // DiscardConsoleEntriesParams discards collected exceptions and console API
@@ -253,13 +261,15 @@ func (p *DisableParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
 type DiscardConsoleEntriesParams struct{}
 
 // DiscardConsoleEntries discards collected exceptions and console API calls.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-discardConsoleEntries
 func DiscardConsoleEntries() *DiscardConsoleEntriesParams {
 	return &DiscardConsoleEntriesParams{}
 }
 
 // Do executes Runtime.discardConsoleEntries against the provided context.
-func (p *DiscardConsoleEntriesParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandDiscardConsoleEntries, nil, nil)
+func (p *DiscardConsoleEntriesParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandDiscardConsoleEntries, nil, nil)
 }
 
 // EnableParams enables reporting of execution contexts creation by means of
@@ -270,31 +280,38 @@ type EnableParams struct{}
 // Enable enables reporting of execution contexts creation by means of
 // executionContextCreated event. When the reporting gets enabled the event will
 // be sent immediately for each existing execution context.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-enable
 func Enable() *EnableParams {
 	return &EnableParams{}
 }
 
 // Do executes Runtime.enable against the provided context.
-func (p *EnableParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandEnable, nil, nil)
+func (p *EnableParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandEnable, nil, nil)
 }
 
 // EvaluateParams evaluates expression on global object.
 type EvaluateParams struct {
-	Expression            string             `json:"expression"`                      // Expression to evaluate.
-	ObjectGroup           string             `json:"objectGroup,omitempty"`           // Symbolic group name that can be used to release multiple objects.
-	IncludeCommandLineAPI bool               `json:"includeCommandLineAPI,omitempty"` // Determines whether Command Line API should be available during the evaluation.
-	Silent                bool               `json:"silent,omitempty"`                // In silent mode exceptions thrown during evaluation are not reported and do not pause execution. Overrides setPauseOnException state.
-	ContextID             ExecutionContextID `json:"contextId,omitempty"`             // Specifies in which execution context to perform evaluation. If the parameter is omitted the evaluation will be performed in the context of the inspected page.
-	ReturnByValue         bool               `json:"returnByValue,omitempty"`         // Whether the result is expected to be a JSON object that should be sent by value.
-	GeneratePreview       bool               `json:"generatePreview,omitempty"`       // Whether preview should be generated for the result.
-	UserGesture           bool               `json:"userGesture,omitempty"`           // Whether execution should be treated as initiated by user in the UI.
-	AwaitPromise          bool               `json:"awaitPromise,omitempty"`          // Whether execution should await for resulting value and return once awaited promise is resolved.
-	ThrowOnSideEffect     bool               `json:"throwOnSideEffect,omitempty"`     // Whether to throw an exception if side effect cannot be ruled out during evaluation.
-	Timeout               TimeDelta          `json:"timeout,omitempty"`               // Terminate execution after timing out (number of milliseconds).
+	Expression                  string             `json:"expression"`                            // Expression to evaluate.
+	ObjectGroup                 string             `json:"objectGroup,omitempty"`                 // Symbolic group name that can be used to release multiple objects.
+	IncludeCommandLineAPI       bool               `json:"includeCommandLineAPI,omitempty"`       // Determines whether Command Line API should be available during the evaluation.
+	Silent                      bool               `json:"silent,omitempty"`                      // In silent mode exceptions thrown during evaluation are not reported and do not pause execution. Overrides setPauseOnException state.
+	ContextID                   ExecutionContextID `json:"contextId,omitempty"`                   // Specifies in which execution context to perform evaluation. If the parameter is omitted the evaluation will be performed in the context of the inspected page.
+	ReturnByValue               bool               `json:"returnByValue,omitempty"`               // Whether the result is expected to be a JSON object that should be sent by value.
+	GeneratePreview             bool               `json:"generatePreview,omitempty"`             // Whether preview should be generated for the result.
+	UserGesture                 bool               `json:"userGesture,omitempty"`                 // Whether execution should be treated as initiated by user in the UI.
+	AwaitPromise                bool               `json:"awaitPromise,omitempty"`                // Whether execution should await for resulting value and return once awaited promise is resolved.
+	ThrowOnSideEffect           bool               `json:"throwOnSideEffect,omitempty"`           // Whether to throw an exception if side effect cannot be ruled out during evaluation. This implies disableBreaks below.
+	Timeout                     TimeDelta          `json:"timeout,omitempty"`                     // Terminate execution after timing out (number of milliseconds).
+	DisableBreaks               bool               `json:"disableBreaks,omitempty"`               // Disable breakpoints during execution.
+	ReplMode                    bool               `json:"replMode,omitempty"`                    // Setting this flag to true enables let re-declaration and top-level await. Note that let variables can only be re-declared if they originate from replMode themselves.
+	AllowUnsafeEvalBlockedByCSP bool               `json:"allowUnsafeEvalBlockedByCSP,omitempty"` // The Content Security Policy (CSP) for the target might block 'unsafe-eval' which includes eval(), Function(), setTimeout() and setInterval() when called with non-callable arguments. This flag bypasses CSP for this evaluation and allows unsafe-eval. Defaults to true.
 }
 
 // Evaluate evaluates expression on global object.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-evaluate
 //
 // parameters:
 //   expression - Expression to evaluate.
@@ -361,7 +378,7 @@ func (p EvaluateParams) WithAwaitPromise(awaitPromise bool) *EvaluateParams {
 }
 
 // WithThrowOnSideEffect whether to throw an exception if side effect cannot
-// be ruled out during evaluation.
+// be ruled out during evaluation. This implies disableBreaks below.
 func (p EvaluateParams) WithThrowOnSideEffect(throwOnSideEffect bool) *EvaluateParams {
 	p.ThrowOnSideEffect = throwOnSideEffect
 	return &p
@@ -370,6 +387,30 @@ func (p EvaluateParams) WithThrowOnSideEffect(throwOnSideEffect bool) *EvaluateP
 // WithTimeout terminate execution after timing out (number of milliseconds).
 func (p EvaluateParams) WithTimeout(timeout TimeDelta) *EvaluateParams {
 	p.Timeout = timeout
+	return &p
+}
+
+// WithDisableBreaks disable breakpoints during execution.
+func (p EvaluateParams) WithDisableBreaks(disableBreaks bool) *EvaluateParams {
+	p.DisableBreaks = disableBreaks
+	return &p
+}
+
+// WithReplMode setting this flag to true enables let re-declaration and
+// top-level await. Note that let variables can only be re-declared if they
+// originate from replMode themselves.
+func (p EvaluateParams) WithReplMode(replMode bool) *EvaluateParams {
+	p.ReplMode = replMode
+	return &p
+}
+
+// WithAllowUnsafeEvalBlockedByCSP the Content Security Policy (CSP) for the
+// target might block 'unsafe-eval' which includes eval(), Function(),
+// setTimeout() and setInterval() when called with non-callable arguments. This
+// flag bypasses CSP for this evaluation and allows unsafe-eval. Defaults to
+// true.
+func (p EvaluateParams) WithAllowUnsafeEvalBlockedByCSP(allowUnsafeEvalBlockedByCSP bool) *EvaluateParams {
+	p.AllowUnsafeEvalBlockedByCSP = allowUnsafeEvalBlockedByCSP
 	return &p
 }
 
@@ -384,10 +425,10 @@ type EvaluateReturns struct {
 // returns:
 //   result - Evaluation result.
 //   exceptionDetails - Exception details.
-func (p *EvaluateParams) Do(ctxt context.Context, h cdp.Executor) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
+func (p *EvaluateParams) Do(ctx context.Context) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res EvaluateReturns
-	err = h.Execute(ctxt, CommandEvaluate, p, &res)
+	err = cdp.Execute(ctx, CommandEvaluate, p, &res)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -399,6 +440,8 @@ func (p *EvaluateParams) Do(ctxt context.Context, h cdp.Executor) (result *Remot
 type GetIsolateIDParams struct{}
 
 // GetIsolateID returns the isolate id.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-getIsolateId
 func GetIsolateID() *GetIsolateIDParams {
 	return &GetIsolateIDParams{}
 }
@@ -412,10 +455,10 @@ type GetIsolateIDReturns struct {
 //
 // returns:
 //   id - The isolate id.
-func (p *GetIsolateIDParams) Do(ctxt context.Context, h cdp.Executor) (id string, err error) {
+func (p *GetIsolateIDParams) Do(ctx context.Context) (id string, err error) {
 	// execute
 	var res GetIsolateIDReturns
-	err = h.Execute(ctxt, CommandGetIsolateID, nil, &res)
+	err = cdp.Execute(ctx, CommandGetIsolateID, nil, &res)
 	if err != nil {
 		return "", err
 	}
@@ -429,6 +472,8 @@ type GetHeapUsageParams struct{}
 
 // GetHeapUsage returns the JavaScript heap usage. It is the total usage of
 // the corresponding isolate not scoped to a particular Runtime.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-getHeapUsage
 func GetHeapUsage() *GetHeapUsageParams {
 	return &GetHeapUsageParams{}
 }
@@ -444,10 +489,10 @@ type GetHeapUsageReturns struct {
 // returns:
 //   usedSize - Used heap size in bytes.
 //   totalSize - Allocated heap size in bytes.
-func (p *GetHeapUsageParams) Do(ctxt context.Context, h cdp.Executor) (usedSize float64, totalSize float64, err error) {
+func (p *GetHeapUsageParams) Do(ctx context.Context) (usedSize float64, totalSize float64, err error) {
 	// execute
 	var res GetHeapUsageReturns
-	err = h.Execute(ctxt, CommandGetHeapUsage, nil, &res)
+	err = cdp.Execute(ctx, CommandGetHeapUsage, nil, &res)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -466,6 +511,8 @@ type GetPropertiesParams struct {
 
 // GetProperties returns properties of a given object. Object group of the
 // result is inherited from the target object.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-getProperties
 //
 // parameters:
 //   objectID - Identifier of the object to return properties for.
@@ -499,6 +546,7 @@ func (p GetPropertiesParams) WithGeneratePreview(generatePreview bool) *GetPrope
 type GetPropertiesReturns struct {
 	Result             []*PropertyDescriptor         `json:"result,omitempty"`             // Object properties.
 	InternalProperties []*InternalPropertyDescriptor `json:"internalProperties,omitempty"` // Internal object properties (only of the element itself).
+	PrivateProperties  []*PrivatePropertyDescriptor  `json:"privateProperties,omitempty"`  // Object private properties.
 	ExceptionDetails   *ExceptionDetails             `json:"exceptionDetails,omitempty"`   // Exception details.
 }
 
@@ -507,16 +555,17 @@ type GetPropertiesReturns struct {
 // returns:
 //   result - Object properties.
 //   internalProperties - Internal object properties (only of the element itself).
+//   privateProperties - Object private properties.
 //   exceptionDetails - Exception details.
-func (p *GetPropertiesParams) Do(ctxt context.Context, h cdp.Executor) (result []*PropertyDescriptor, internalProperties []*InternalPropertyDescriptor, exceptionDetails *ExceptionDetails, err error) {
+func (p *GetPropertiesParams) Do(ctx context.Context) (result []*PropertyDescriptor, internalProperties []*InternalPropertyDescriptor, privateProperties []*PrivatePropertyDescriptor, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res GetPropertiesReturns
-	err = h.Execute(ctxt, CommandGetProperties, p, &res)
+	err = cdp.Execute(ctx, CommandGetProperties, p, &res)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
-	return res.Result, res.InternalProperties, res.ExceptionDetails, nil
+	return res.Result, res.InternalProperties, res.PrivateProperties, res.ExceptionDetails, nil
 }
 
 // GlobalLexicalScopeNamesParams returns all let, const and class variables
@@ -527,6 +576,8 @@ type GlobalLexicalScopeNamesParams struct {
 
 // GlobalLexicalScopeNames returns all let, const and class variables from
 // global scope.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-globalLexicalScopeNames
 //
 // parameters:
 func GlobalLexicalScopeNames() *GlobalLexicalScopeNamesParams {
@@ -549,10 +600,10 @@ type GlobalLexicalScopeNamesReturns struct {
 //
 // returns:
 //   names
-func (p *GlobalLexicalScopeNamesParams) Do(ctxt context.Context, h cdp.Executor) (names []string, err error) {
+func (p *GlobalLexicalScopeNamesParams) Do(ctx context.Context) (names []string, err error) {
 	// execute
 	var res GlobalLexicalScopeNamesReturns
-	err = h.Execute(ctxt, CommandGlobalLexicalScopeNames, p, &res)
+	err = cdp.Execute(ctx, CommandGlobalLexicalScopeNames, p, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -567,6 +618,8 @@ type QueryObjectsParams struct {
 }
 
 // QueryObjects [no description].
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-queryObjects
 //
 // parameters:
 //   prototypeObjectID - Identifier of the prototype to return objects for.
@@ -592,10 +645,10 @@ type QueryObjectsReturns struct {
 //
 // returns:
 //   objects - Array with objects.
-func (p *QueryObjectsParams) Do(ctxt context.Context, h cdp.Executor) (objects *RemoteObject, err error) {
+func (p *QueryObjectsParams) Do(ctx context.Context) (objects *RemoteObject, err error) {
 	// execute
 	var res QueryObjectsReturns
-	err = h.Execute(ctxt, CommandQueryObjects, p, &res)
+	err = cdp.Execute(ctx, CommandQueryObjects, p, &res)
 	if err != nil {
 		return nil, err
 	}
@@ -610,6 +663,8 @@ type ReleaseObjectParams struct {
 
 // ReleaseObject releases remote object with given id.
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-releaseObject
+//
 // parameters:
 //   objectID - Identifier of the object to release.
 func ReleaseObject(objectID RemoteObjectID) *ReleaseObjectParams {
@@ -619,8 +674,8 @@ func ReleaseObject(objectID RemoteObjectID) *ReleaseObjectParams {
 }
 
 // Do executes Runtime.releaseObject against the provided context.
-func (p *ReleaseObjectParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandReleaseObject, p, nil)
+func (p *ReleaseObjectParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandReleaseObject, p, nil)
 }
 
 // ReleaseObjectGroupParams releases all remote objects that belong to a
@@ -632,6 +687,8 @@ type ReleaseObjectGroupParams struct {
 // ReleaseObjectGroup releases all remote objects that belong to a given
 // group.
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-releaseObjectGroup
+//
 // parameters:
 //   objectGroup - Symbolic object group name.
 func ReleaseObjectGroup(objectGroup string) *ReleaseObjectGroupParams {
@@ -641,8 +698,8 @@ func ReleaseObjectGroup(objectGroup string) *ReleaseObjectGroupParams {
 }
 
 // Do executes Runtime.releaseObjectGroup against the provided context.
-func (p *ReleaseObjectGroupParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandReleaseObjectGroup, p, nil)
+func (p *ReleaseObjectGroupParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandReleaseObjectGroup, p, nil)
 }
 
 // RunIfWaitingForDebuggerParams tells inspected instance to run if it was
@@ -651,13 +708,15 @@ type RunIfWaitingForDebuggerParams struct{}
 
 // RunIfWaitingForDebugger tells inspected instance to run if it was waiting
 // for debugger to attach.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-runIfWaitingForDebugger
 func RunIfWaitingForDebugger() *RunIfWaitingForDebuggerParams {
 	return &RunIfWaitingForDebuggerParams{}
 }
 
 // Do executes Runtime.runIfWaitingForDebugger against the provided context.
-func (p *RunIfWaitingForDebuggerParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandRunIfWaitingForDebugger, nil, nil)
+func (p *RunIfWaitingForDebuggerParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandRunIfWaitingForDebugger, nil, nil)
 }
 
 // RunScriptParams runs script with given id in a given context.
@@ -673,6 +732,8 @@ type RunScriptParams struct {
 }
 
 // RunScript runs script with given id in a given context.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-runScript
 //
 // parameters:
 //   scriptID - Id of the script to run.
@@ -742,10 +803,10 @@ type RunScriptReturns struct {
 // returns:
 //   result - Run result.
 //   exceptionDetails - Exception details.
-func (p *RunScriptParams) Do(ctxt context.Context, h cdp.Executor) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
+func (p *RunScriptParams) Do(ctx context.Context) (result *RemoteObject, exceptionDetails *ExceptionDetails, err error) {
 	// execute
 	var res RunScriptReturns
-	err = h.Execute(ctxt, CommandRunScript, p, &res)
+	err = cdp.Execute(ctx, CommandRunScript, p, &res)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -760,6 +821,8 @@ type SetCustomObjectFormatterEnabledParams struct {
 
 // SetCustomObjectFormatterEnabled [no description].
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-setCustomObjectFormatterEnabled
+//
 // parameters:
 //   enabled
 func SetCustomObjectFormatterEnabled(enabled bool) *SetCustomObjectFormatterEnabledParams {
@@ -769,8 +832,8 @@ func SetCustomObjectFormatterEnabled(enabled bool) *SetCustomObjectFormatterEnab
 }
 
 // Do executes Runtime.setCustomObjectFormatterEnabled against the provided context.
-func (p *SetCustomObjectFormatterEnabledParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandSetCustomObjectFormatterEnabled, p, nil)
+func (p *SetCustomObjectFormatterEnabledParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandSetCustomObjectFormatterEnabled, p, nil)
 }
 
 // SetMaxCallStackSizeToCaptureParams [no description].
@@ -779,6 +842,8 @@ type SetMaxCallStackSizeToCaptureParams struct {
 }
 
 // SetMaxCallStackSizeToCapture [no description].
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-setMaxCallStackSizeToCapture
 //
 // parameters:
 //   size
@@ -789,8 +854,8 @@ func SetMaxCallStackSizeToCapture(size int64) *SetMaxCallStackSizeToCaptureParam
 }
 
 // Do executes Runtime.setMaxCallStackSizeToCapture against the provided context.
-func (p *SetMaxCallStackSizeToCaptureParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandSetMaxCallStackSizeToCapture, p, nil)
+func (p *SetMaxCallStackSizeToCaptureParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandSetMaxCallStackSizeToCapture, p, nil)
 }
 
 // TerminateExecutionParams terminate current or next JavaScript execution.
@@ -799,13 +864,15 @@ type TerminateExecutionParams struct{}
 
 // TerminateExecution terminate current or next JavaScript execution. Will
 // cancel the termination when the outer-most script execution ends.
+//
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-terminateExecution
 func TerminateExecution() *TerminateExecutionParams {
 	return &TerminateExecutionParams{}
 }
 
 // Do executes Runtime.terminateExecution against the provided context.
-func (p *TerminateExecutionParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandTerminateExecution, nil, nil)
+func (p *TerminateExecutionParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandTerminateExecution, nil, nil)
 }
 
 // AddBindingParams if executionContextId is empty, adds binding with the
@@ -828,6 +895,8 @@ type AddBindingParams struct {
 // other input, function throws an exception. Each binding function call
 // produces Runtime.bindingCalled notification.
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-addBinding
+//
 // parameters:
 //   name
 func AddBinding(name string) *AddBindingParams {
@@ -843,8 +912,8 @@ func (p AddBindingParams) WithExecutionContextID(executionContextID ExecutionCon
 }
 
 // Do executes Runtime.addBinding against the provided context.
-func (p *AddBindingParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandAddBinding, p, nil)
+func (p *AddBindingParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandAddBinding, p, nil)
 }
 
 // RemoveBindingParams this method does not remove binding function from
@@ -858,6 +927,8 @@ type RemoveBindingParams struct {
 // object but unsubscribes current runtime agent from Runtime.bindingCalled
 // notifications.
 //
+// See: https://chromedevtools.github.io/devtools-protocol/tot/Runtime#method-removeBinding
+//
 // parameters:
 //   name
 func RemoveBinding(name string) *RemoveBindingParams {
@@ -867,8 +938,8 @@ func RemoveBinding(name string) *RemoveBindingParams {
 }
 
 // Do executes Runtime.removeBinding against the provided context.
-func (p *RemoveBindingParams) Do(ctxt context.Context, h cdp.Executor) (err error) {
-	return h.Execute(ctxt, CommandRemoveBinding, p, nil)
+func (p *RemoveBindingParams) Do(ctx context.Context) (err error) {
+	return cdp.Execute(ctx, CommandRemoveBinding, p, nil)
 }
 
 // Command names.

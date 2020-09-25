@@ -19,62 +19,69 @@
 package listeners
 
 import (
-	"strings"
-
-	"github.com/webx-top/db/lib/factory"
-
+	"github.com/admpub/nging/application/library/fileupdater"
 	"github.com/admpub/nging/application/library/fileupdater/listener"
 )
 
-func New() *Listeners {
-	return &Listeners{}
+func New(table ...string) fileupdater.Listener {
+	l := &Listeners{
+		options: map[string]*fileupdater.Options{},
+	}
+	if len(table) > 0 {
+		l.SetTableName(table[0])
+	}
+	return l
 }
 
-type Listeners map[string]func(m factory.Model) (tableID string, content string, property *listener.Property)
+type Listeners struct {
+	options   map[string]*fileupdater.Options
+	tableName string
+}
 
-func (a *Listeners) Listen(tableName string, embedded bool, seperatorAndSameFields ...string) *Listeners {
-	var sameFields []string
-	var seperator string
-	if len(seperatorAndSameFields) > 0 {
-		seperator = seperatorAndSameFields[0]
-	}
-	if len(seperatorAndSameFields) > 1 {
-		sameFields = seperatorAndSameFields[1:]
-	}
-	for _field, _listener := range *a {
-		listener.New(_listener, embedded, seperator).SetTable(tableName, _field, sameFields...).ListenDefault()
-		delete(*a, _field)
-	}
+func (a *Listeners) SetTableName(tableName string) fileupdater.Listener {
+	a.tableName = tableName
 	return a
 }
 
-func (a *Listeners) ListenByField(fieldNames string, tableName string, embedded bool, seperatorAndSameFields ...string) *Listeners {
-	var sameFields []string
-	var seperator string
-	if len(seperatorAndSameFields) > 0 {
-		seperator = seperatorAndSameFields[0]
+func (a *Listeners) Listen() {
+	for _field, _option := range a.options {
+		listener.NewWithOptions(_option).ListenDefault()
+		delete(a.options, _field)
 	}
-	if len(seperatorAndSameFields) > 1 {
-		sameFields = seperatorAndSameFields[1:]
+}
+
+func (a *Listeners) BuildOptions(fieldName string, setters ...fileupdater.OptionSetter) *fileupdater.Options {
+	options := &fileupdater.Options{
+		FieldName: fieldName,
+		TableName: a.tableName,
 	}
-	for _, fieldName := range strings.Split(fieldNames, `,`) {
-		if _listener, ok := (*a)[fieldName]; ok {
-			listener.New(_listener, embedded, seperator).SetTable(tableName, fieldName, sameFields...).ListenDefault()
-			delete(*a, fieldName)
-		}
+	for _, setter := range setters {
+		setter(options)
 	}
+	if options.Callback == nil {
+		options.Callback = fileupdater.GenCallbackDefault(fieldName, options.FieldValue)
+	}
+	if len(options.TableName) == 0 {
+		panic(`liseners.options: TableName is empty`)
+	}
+	return options
+}
+
+func (a *Listeners) ListenByOptions(fieldName string, setters ...fileupdater.OptionSetter) {
+	options := a.BuildOptions(fieldName, setters...)
+	listener.NewWithOptions(options).ListenDefault()
+}
+
+func (a *Listeners) Add(fieldName string, setters ...fileupdater.OptionSetter) fileupdater.Listener {
+	options := a.BuildOptions(fieldName, setters...)
+	a.options[fieldName] = options
 	return a
 }
 
-func (a *Listeners) Add(fieldName string, callback func(m factory.Model) (tableID string, content string, property *listener.Property)) *Listeners {
-	(*a)[fieldName] = callback
-	return a
-}
-
-func (a *Listeners) Delete(fieldNames ...string) *Listeners {
+func (a *Listeners) Delete(fieldNames ...string) fileupdater.Listener {
 	for _, fieldName := range fieldNames {
-		if _, ok := (*a)[fieldName]; ok {
-			delete(*a, fieldName)
+		if _, ok := a.options[fieldName]; ok {
+			delete(a.options, fieldName)
 		}
 	}
 	return a

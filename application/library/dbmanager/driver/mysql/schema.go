@@ -223,8 +223,7 @@ func (op *Operation) Apply(m *mySQL) error {
 				m.AddResults(r)
 				return r.err
 			}
-		}
-		if hasOpt {
+		} else if hasOpt {
 			if op.Scope == `proxy` {
 				r := &Result{}
 				r.SQL = `REVOKE PROXY ` + on
@@ -341,7 +340,7 @@ func (g *Grant) IsValid(group string, values map[string]*echo.Mapx) bool {
 	}
 	switch g.Scope {
 	case `all`:
-		return group == `Server_Admin` || group == `Procedures`
+		return group == `Server_Admin` || group == `Procedures` || group == `Databases` || group == `Tables` || group == `Columns`
 	case `database`:
 		return group == `Databases` || group == `Procedures`
 	case `table`:
@@ -447,6 +446,7 @@ type IndexInfo struct {
 	Comment       sql.NullString
 	Index_comment sql.NullString
 	Visible       sql.NullString
+	Expression    sql.NullString
 }
 
 type Indexes struct {

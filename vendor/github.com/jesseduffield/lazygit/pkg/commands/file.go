@@ -1,36 +1,46 @@
 package commands
 
-import "github.com/fatih/color"
+import (
+	"strings"
+
+	"github.com/jesseduffield/lazygit/pkg/utils"
+)
 
 // File : A file from git status
 // duplicating this for now
 type File struct {
-	Name               string
-	HasStagedChanges   bool
-	HasUnstagedChanges bool
-	Tracked            bool
-	Deleted            bool
-	HasMergeConflicts  bool
-	DisplayString      string
-	Type               string // one of 'file', 'directory', and 'other'
+	Name                    string
+	HasStagedChanges        bool
+	HasUnstagedChanges      bool
+	Tracked                 bool
+	Deleted                 bool
+	HasMergeConflicts       bool
+	HasInlineMergeConflicts bool
+	DisplayString           string
+	Type                    string // one of 'file', 'directory', and 'other'
+	ShortStatus             string // e.g. 'AD', ' A', 'M ', '??'
 }
 
-// GetDisplayStrings returns the display string of a file
-func (f *File) GetDisplayStrings() []string {
-	// potentially inefficient to be instantiating these color
-	// objects with each render
-	red := color.New(color.FgRed)
-	green := color.New(color.FgGreen)
-	if !f.Tracked && !f.HasStagedChanges {
-		return []string{red.Sprint(f.DisplayString)}
-	}
+const RENAME_SEPARATOR = " -> "
 
-	output := green.Sprint(f.DisplayString[0:1])
-	output += red.Sprint(f.DisplayString[1:3])
-	if f.HasUnstagedChanges {
-		output += red.Sprint(f.Name)
-	} else {
-		output += green.Sprint(f.Name)
-	}
-	return []string{output}
+func (f *File) IsRename() bool {
+	return strings.Contains(f.Name, RENAME_SEPARATOR)
+}
+
+// Names returns an array containing just the filename, or in the case of a rename, the after filename and the before filename
+func (f *File) Names() []string {
+	return strings.Split(f.Name, RENAME_SEPARATOR)
+}
+
+// returns true if the file names are the same or if a a file rename includes the filename of the other
+func (f *File) Matches(f2 *File) bool {
+	return utils.StringArraysOverlap(f.Names(), f2.Names())
+}
+
+func (f *File) ID() string {
+	return f.Name
+}
+
+func (f *File) Description() string {
+	return f.Name
 }

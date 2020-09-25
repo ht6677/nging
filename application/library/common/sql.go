@@ -1,11 +1,13 @@
 package common
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/webx-top/com"
 	"github.com/webx-top/db"
 	"github.com/webx-top/db/lib/factory"
+	"github.com/webx-top/db/mysql"
 )
 
 func ParseSQL(sqlFile string, isFile bool, installer func(string) error) (err error) {
@@ -45,4 +47,34 @@ func ReplacePrefix(m factory.Model, field string, oldPrefix string, newPrefix st
 	oldPrefix = com.AddSlashes(oldPrefix, '_', '%')
 	value := db.Raw("REPLACE(`"+field+"`, ?, ?)", oldPrefix, newPrefix)
 	return m.SetField(nil, field, value, field, db.Like(oldPrefix+`%`))
+}
+
+var (
+	sqlCharsetRegexp     = regexp.MustCompile(`(?i) (CHARACTER SET |CHARSET=)utf8mb4 `)
+	sqlCollateRegexp     = regexp.MustCompile(`(?i) (COLLATE[= ])utf8mb4_general_ci`)
+	sqlCreateTableRegexp = regexp.MustCompile(`(?i)^CREATE TABLE `)
+	mysqlNetworkRegexp   = regexp.MustCompile(`^[/]{2,}`)
+)
+
+// ReplaceCharset 替换DDL语句中的字符集
+func ReplaceCharset(sqlStr string, charset string, checkCreateDDL ...bool) string {
+	if charset == `utf8mb4` {
+		return sqlStr
+	}
+	if len(checkCreateDDL) > 0 && checkCreateDDL[0] {
+		if !sqlCreateTableRegexp.MatchString(sqlStr) {
+			return sqlStr
+		}
+	}
+	sqlStr = sqlCharsetRegexp.ReplaceAllString(sqlStr, ` ${1}`+charset+` `)
+	sqlStr = sqlCollateRegexp.ReplaceAllString(sqlStr, ` ${1}`+charset+`_general_ci`)
+	return sqlStr
+}
+
+func ParseMysqlConnectionURL(settings *mysql.ConnectionURL) {
+	if strings.HasPrefix(settings.Host, `unix:`) {
+		settings.Socket = strings.TrimPrefix(settings.Host, `unix:`)
+		settings.Socket = mysqlNetworkRegexp.ReplaceAllString(settings.Socket, `/`)
+		settings.Host = ``
+	}
 }

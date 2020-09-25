@@ -23,15 +23,10 @@ import (
 
 	"github.com/webx-top/db"
 	"github.com/webx-top/echo"
+	"github.com/webx-top/echo/param"
 
 	"github.com/admpub/nging/application/dbschema"
-	_ "github.com/admpub/nging/application/library/imbot/dingding"
-	_ "github.com/admpub/nging/application/library/imbot/workwx"
 	"github.com/admpub/nging/application/model/base"
-)
-
-var (
-	AlertTopics     = echo.NewKVData()
 )
 
 func NewAlertTopic(ctx echo.Context) *AlertTopic {
@@ -48,22 +43,22 @@ type AlertTopic struct {
 	base *base.Base
 }
 
-func (s *AlertTopic) check() error {
-	s.Topic = strings.TrimSpace(s.Topic)
-	if len(s.Topic) == 0 {
+func (s *AlertTopic) check(row *dbschema.NgingAlertTopic) error {
+	row.Topic = strings.TrimSpace(row.Topic)
+	if len(row.Topic) == 0 {
 		return s.base.E(`topic不能为空`)
 	}
-	if s.RecipientId <= 0 {
+	if row.RecipientId <= 0 {
 		return s.base.E(`收信账号ID不能为空`)
 	}
 	var (
 		exists bool
-		err error
+		err    error
 	)
-	if s.Id > 0 {
-		exists, err = s.ExistsOther(s.Topic, s.RecipientId, s.Id)
+	if row.Id > 0 {
+		exists, err = s.ExistsOther(row.Topic, row.RecipientId, row.Id)
 	} else {
-		exists, err = s.Exists(s.Topic, s.RecipientId)
+		exists, err = s.Exists(row.Topic, row.RecipientId)
 	}
 	if err != nil {
 		return err
@@ -74,11 +69,17 @@ func (s *AlertTopic) check() error {
 	return err
 }
 
-func (s *AlertTopic) Add() (pk interface{}, err error) {
-	if err = s.check(); err != nil {
+func (s *AlertTopic) Add(rows ...*dbschema.NgingAlertTopic) (pk interface{}, err error) {
+	var bean *dbschema.NgingAlertTopic
+	if len(rows) > 0 {
+		bean = rows[0]
+	} else {
+		bean = s.NgingAlertTopic
+	}
+	if err = s.check(bean); err != nil {
 		return nil, err
 	}
-	return s.NgingAlertTopic.Add()
+	return bean.Add()
 }
 
 func (s *AlertTopic) Exists(topic string, recipientId uint) (bool, error) {
@@ -97,14 +98,14 @@ func (s *AlertTopic) ExistsOther(topic string, recipientId uint, excludeID uint)
 }
 
 func (s *AlertTopic) Edit(mw func(db.Result) db.Result, args ...interface{}) (err error) {
-	if err = s.check(); err != nil {
+	if err = s.check(s.NgingAlertTopic); err != nil {
 		return err
 	}
 	return s.NgingAlertTopic.Edit(mw, args...)
 }
 
-func (s *AlertTopic) Send(topic string, title string, message string) (err error) {
-	skey := `NgingAlertTopics.`+topic
+func (s *AlertTopic) Send(topic string, params param.Store) (err error) {
+	skey := `NgingAlertTopics.` + topic
 	rows, ok := s.base.Context.Internal().Get(skey).([]*AlertTopicExt)
 	if !ok {
 		rows = []*AlertTopicExt{}
@@ -118,7 +119,7 @@ func (s *AlertTopic) Send(topic string, title string, message string) (err error
 		s.base.Context.Internal().Set(skey, rows)
 	}
 	for _, row := range rows {
-		err = row.Send(title, message)
+		err = row.Send(params)
 	}
 	return
 }

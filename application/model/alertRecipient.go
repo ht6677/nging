@@ -25,24 +25,8 @@ import (
 	"github.com/webx-top/echo"
 
 	"github.com/admpub/nging/application/dbschema"
-	"github.com/admpub/nging/application/library/imbot"
-	_ "github.com/admpub/nging/application/library/imbot/dingding"
-	_ "github.com/admpub/nging/application/library/imbot/workwx"
 	"github.com/admpub/nging/application/model/base"
 )
-
-var (
-	AlertRecipientTypes     = echo.NewKVData()
-	AlertRecipientPlatforms = echo.NewKVData()
-)
-
-func init() {
-	AlertRecipientTypes.Add(`email`, `email`)
-	AlertRecipientTypes.Add(`webhook`, `webhook`)
-	for name, mess := range imbot.Messagers() {
-		AlertRecipientPlatforms.Add(name, mess.Label)
-	}
-}
 
 func NewAlertRecipient(ctx echo.Context) *AlertRecipient {
 	m := &AlertRecipient{
@@ -102,4 +86,22 @@ func (s *AlertRecipient) Edit(mw func(db.Result) db.Result, args ...interface{})
 		return err
 	}
 	return s.NgingAlertRecipient.Edit(mw, args...)
+}
+
+func (s *AlertRecipient) Delete(mw func(db.Result) db.Result, args ...interface{}) (err error) {
+	m := NewAlertTopic(s.base.Context)
+	var rows []*dbschema.NgingAlertRecipient
+	s.NgingAlertRecipient.ListByOffset(&rows, nil, 0, -1, args...)
+	recipientIDs := make([]uint, len(rows))
+	for index, recipient := range rows {
+		recipientIDs[index] = recipient.Id
+	}
+	if len(recipientIDs) == 0 {
+		return
+	}
+	err = m.Delete(nil, db.Cond{`recipient_id`: db.In(recipientIDs)})
+	if err != nil {
+		return
+	}
+	return s.NgingAlertRecipient.Delete(mw, args...)
 }
